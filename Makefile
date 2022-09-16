@@ -6,6 +6,7 @@ PKG := $(ORG)/rukpak
 GO_INSTALL_OPTS ?= "-mod=readonly"
 export IMAGE_REPO ?= quay.io/operator-framework/rukpak
 export IMAGE_TAG ?= latest
+export GO_BUILD_TAGS ?= upstream
 IMAGE?=$(IMAGE_REPO):$(IMAGE_TAG)
 KIND_CLUSTER_NAME ?= rukpak
 BIN_DIR := bin
@@ -55,7 +56,7 @@ help: ## Show this help screen
 lint: golangci-lint ## Run golangci linter
 	# Set the golangci-lint cache directory to a directory that's
 	# writable in downstream CI.
-	GOLANGCI_LINT_CACHE=/tmp/golangci-cache $(GOLANGCI_LINT) run
+	GOLANGCI_LINT_CACHE=/tmp/golangci-cache $(GOLANGCI_LINT) run --build-tags $(GO_BUILD_TAGS)
 
 tidy: ## Update dependencies
 	$(Q)go mod tidy
@@ -92,11 +93,11 @@ setup-envtest: envtest
 ENVTEST_VERSION = $(shell go list -m k8s.io/client-go | cut -d" " -f2 | sed 's/^v0\.\([[:digit:]]\{1,\}\)\.[[:digit:]]\{1,\}$$/1.\1.x/')
 UNIT_TEST_DIRS=$(shell go list ./... | grep -v /test/)
 test-unit: setup-envtest ## Run the unit tests
-	KUBEBUILDER_ASSETS=$(KUBEBUILDER_ASSETS) go test -count=1 -short $(UNIT_TEST_DIRS)
+	KUBEBUILDER_ASSETS=$(KUBEBUILDER_ASSETS) go test -tags $(GO_BUILD_TAGS) -count=1 -short $(UNIT_TEST_DIRS)
 
 FOCUS := $(if $(TEST),-v -focus "$(TEST)")
 test-e2e: ginkgo ## Run the e2e tests
-	$(GINKGO) -trace -progress $(FOCUS) test/e2e
+	$(GINKGO) --tags $(GO_BUILD_TAGS) -trace -progress $(FOCUS) test/e2e
 
 e2e: KIND_CLUSTER_NAME=rukpak-e2e
 e2e: run image-registry kind-load-bundles registry-load-bundles test-e2e kind-cluster-cleanup ## Run e2e tests against an ephemeral kind cluster
@@ -147,10 +148,10 @@ VERSION_FLAGS=-ldflags "-X $(VERSION_PATH).GitCommit=$(GIT_COMMIT)"
 build: $(BINARIES)
 
 $(LINUX_BINARIES):
-	CGO_ENABLED=0 GOOS=linux go build $(VERSION_FLAGS) -o $(BIN_DIR)/$@ ./cmd/$(notdir $@)
+	CGO_ENABLED=0 GOOS=linux go build -tags $(GO_BUILD_TAGS) $(VERSION_FLAGS) -o $(BIN_DIR)/$@ ./cmd/$(notdir $@)
 
 $(BINARIES):
-	CGO_ENABLED=0 go build $(VERSION_FLAGS) -o $(BIN_DIR)/$@ ./cmd/$@
+	CGO_ENABLED=0 go build -tags $(GO_BUILD_TAGS) $(VERSION_FLAGS) -o $(BIN_DIR)/$@ ./cmd/$@
 
 build-container: $(LINUX_BINARIES) ## Builds provisioner container image locally
 	$(CONTAINER_RUNTIME) build -f Dockerfile -t $(IMAGE) $(BIN_DIR)/linux
