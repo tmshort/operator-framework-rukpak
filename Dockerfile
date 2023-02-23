@@ -14,6 +14,9 @@ FROM registry.ci.openshift.org/ocp/4.13:base
 COPY --from=builder /build/bin/core /
 COPY --from=builder /build/bin/unpack /
 COPY --from=builder /build/bin/webhooks /
+COPY --from=builder /build/bin/helm /
+COPY --from=builder /build/bin/crdvalidator /
+COPY --from=builder /build/bin/rukpakctl /
 USER 1001
 
 LABEL io.k8s.display-name="OpenShift RukPak" \
