@@ -15,7 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	rukpakv1alpha1 "github.com/operator-framework/rukpak/api/v1alpha1"
-	helm "github.com/operator-framework/rukpak/internal/provisioner/helm/types"
+	"github.com/operator-framework/rukpak/internal/provisioner/helm"
 )
 
 var _ = Describe("helm provisioner bundledeployment", func() {
@@ -74,7 +74,7 @@ var _ = Describe("helm provisioner bundledeployment", func() {
 				WithTransform(func(c *metav1.Condition) string { return c.Type }, Equal(rukpakv1alpha1.TypeInstalled)),
 				WithTransform(func(c *metav1.Condition) metav1.ConditionStatus { return c.Status }, Equal(metav1.ConditionTrue)),
 				WithTransform(func(c *metav1.Condition) string { return c.Reason }, Equal(rukpakv1alpha1.ReasonInstallationSucceeded)),
-				WithTransform(func(c *metav1.Condition) string { return c.Message }, ContainSubstring("instantiated bundle")),
+				WithTransform(func(c *metav1.Condition) string { return c.Message }, ContainSubstring("Instantiated bundle")),
 			))
 		})
 
@@ -101,14 +101,7 @@ var _ = Describe("helm provisioner bundledeployment", func() {
 					WithTransform(func(c *appsv1.DeploymentCondition) string { return c.Message }, ContainSubstring("Deployment has minimum availability.")),
 				))
 			})
-
-			// The helm chart provisioner doesn't appear to support dynamically reconciling the underlying
-			// chart contents after they have been installed. In the case that a deployment resource has
-			// been manually created, that deletion event won't trigger a new reconciliation for the
-			// provisioner. Disabling this test until this functionality is added.
-			//
-			// See https://github.com/operator-framework/rukpak/issues/514 for more information.
-			PIt("should re-create a deployment resource when manually deleted", func() {
+			It("should re-create a deployment resource when manually deleted", func() {
 				deployment := &appsv1.Deployment{}
 
 				Eventually(func() error {
@@ -367,7 +360,7 @@ var _ = Describe("helm provisioner bundledeployment", func() {
 				WithTransform(func(c *metav1.Condition) string { return c.Type }, Equal(rukpakv1alpha1.TypeInstalled)),
 				WithTransform(func(c *metav1.Condition) metav1.ConditionStatus { return c.Status }, Equal(metav1.ConditionTrue)),
 				WithTransform(func(c *metav1.Condition) string { return c.Reason }, Equal(rukpakv1alpha1.ReasonInstallationSucceeded)),
-				WithTransform(func(c *metav1.Condition) string { return c.Message }, ContainSubstring("instantiated bundle")),
+				WithTransform(func(c *metav1.Condition) string { return c.Message }, ContainSubstring("Instantiated bundle")),
 			))
 		})
 
@@ -491,7 +484,7 @@ var _ = Describe("helm provisioner bundledeployment", func() {
 				WithTransform(func(c *metav1.Condition) string { return c.Type }, Equal(rukpakv1alpha1.TypeInstalled)),
 				WithTransform(func(c *metav1.Condition) metav1.ConditionStatus { return c.Status }, Equal(metav1.ConditionTrue)),
 				WithTransform(func(c *metav1.Condition) string { return c.Reason }, Equal(rukpakv1alpha1.ReasonInstallationSucceeded)),
-				WithTransform(func(c *metav1.Condition) string { return c.Message }, ContainSubstring("instantiated bundle")),
+				WithTransform(func(c *metav1.Condition) string { return c.Message }, ContainSubstring("Instantiated bundle")),
 			))
 		})
 	})
@@ -551,7 +544,7 @@ var _ = Describe("helm provisioner bundledeployment", func() {
 				WithTransform(func(c *metav1.Condition) string { return c.Type }, Equal(rukpakv1alpha1.TypeInstalled)),
 				WithTransform(func(c *metav1.Condition) metav1.ConditionStatus { return c.Status }, Equal(metav1.ConditionTrue)),
 				WithTransform(func(c *metav1.Condition) string { return c.Reason }, Equal(rukpakv1alpha1.ReasonInstallationSucceeded)),
-				WithTransform(func(c *metav1.Condition) string { return c.Message }, ContainSubstring("instantiated bundle")),
+				WithTransform(func(c *metav1.Condition) string { return c.Message }, ContainSubstring("Instantiated bundle")),
 			))
 
 			By("eventually install helm chart successfully")

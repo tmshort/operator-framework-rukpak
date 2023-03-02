@@ -11,8 +11,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	rukpakv1alpha1 "github.com/operator-framework/rukpak/api/v1alpha1"
-	plain "github.com/operator-framework/rukpak/internal/provisioner/plain/types"
-	registry "github.com/operator-framework/rukpak/internal/provisioner/registry/types"
+	"github.com/operator-framework/rukpak/internal/provisioner/plain"
+	"github.com/operator-framework/rukpak/internal/provisioner/registry"
 )
 
 var _ = Describe("registry provisioner bundle", func() {
@@ -41,7 +41,7 @@ var _ = Describe("registry provisioner bundle", func() {
 							Source: rukpakv1alpha1.BundleSource{
 								Type: rukpakv1alpha1.SourceTypeImage,
 								Image: &rukpakv1alpha1.ImageSource{
-									Ref: "testdata/bundles/registry:valid",
+									Ref: fmt.Sprintf("%v/%v", ImageRepo, "registry:valid"),
 								},
 							},
 						},
@@ -71,7 +71,7 @@ var _ = Describe("registry provisioner bundle", func() {
 				WithTransform(func(c *metav1.Condition) string { return c.Type }, Equal(rukpakv1alpha1.TypeInstalled)),
 				WithTransform(func(c *metav1.Condition) metav1.ConditionStatus { return c.Status }, Equal(metav1.ConditionTrue)),
 				WithTransform(func(c *metav1.Condition) string { return c.Reason }, Equal(rukpakv1alpha1.ReasonInstallationSucceeded)),
-				WithTransform(func(c *metav1.Condition) string { return c.Message }, ContainSubstring("instantiated bundle")),
+				WithTransform(func(c *metav1.Condition) string { return c.Message }, ContainSubstring("Instantiated bundle")),
 			))
 		})
 	})
@@ -100,7 +100,7 @@ var _ = Describe("registry provisioner bundle", func() {
 							Source: rukpakv1alpha1.BundleSource{
 								Type: rukpakv1alpha1.SourceTypeImage,
 								Image: &rukpakv1alpha1.ImageSource{
-									Ref: "testdata/bundles/registry:invalid",
+									Ref: fmt.Sprintf("%v/%v", ImageRepo, "registry:invalid"),
 								},
 							},
 						},

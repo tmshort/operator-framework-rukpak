@@ -9,7 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	rukpakv1alpha1 "github.com/operator-framework/rukpak/api/v1alpha1"
-	plain "github.com/operator-framework/rukpak/internal/provisioner/plain/types"
+	"github.com/operator-framework/rukpak/internal/provisioner/plain"
 )
 
 var _ = Describe("bundle api validating webhook", func() {
@@ -33,7 +33,7 @@ var _ = Describe("bundle api validating webhook", func() {
 					Source: rukpakv1alpha1.BundleSource{
 						Type: rukpakv1alpha1.SourceTypeImage,
 						Image: &rukpakv1alpha1.ImageSource{
-							Ref: "testdata/bundles/plain-v0:valid",
+							Ref: "localhost/testdata/bundles/plain-v0:valid",
 						},
 					},
 				},
@@ -68,7 +68,7 @@ var _ = Describe("bundle api validating webhook", func() {
 					Source: rukpakv1alpha1.BundleSource{
 						Type: rukpakv1alpha1.SourceTypeGit,
 						Image: &rukpakv1alpha1.ImageSource{
-							Ref: "testdata/bundles/plain-v0:valid",
+							Ref: "localhost/testdata/bundles/plain-v0:valid",
 						},
 					},
 				},

@@ -12,7 +12,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	rukpakv1alpha1 "github.com/operator-framework/rukpak/api/v1alpha1"
-	plain "github.com/operator-framework/rukpak/internal/provisioner/plain/types"
+	"github.com/operator-framework/rukpak/internal/provisioner/plain"
 )
 
 var _ = Describe("bundle api validation", func() {
@@ -34,7 +34,7 @@ var _ = Describe("bundle api validation", func() {
 					Source: rukpakv1alpha1.BundleSource{
 						Type: rukpakv1alpha1.SourceTypeImage,
 						Image: &rukpakv1alpha1.ImageSource{
-							Ref: "testdata/bundles/plain-v0:valid",
+							Ref: "localhost/testdata/bundles/plain-v0:valid",
 						},
 					},
 				},
@@ -69,7 +69,7 @@ var _ = Describe("bundle api validation", func() {
 					Source: rukpakv1alpha1.BundleSource{
 						Type: "invalid source",
 						Image: &rukpakv1alpha1.ImageSource{
-							Ref: "testdata/bundles/plain-v0:valid",
+							Ref: "localhost/testdata/bundles/plain-v0:valid",
 						},
 						Git: &rukpakv1alpha1.GitSource{
 							Repository: "https://github.com/exdx/combo-bundle",
@@ -226,7 +226,7 @@ var _ = Describe("bundle api validation", func() {
 					Source: rukpakv1alpha1.BundleSource{
 						Type: rukpakv1alpha1.SourceTypeImage,
 						Image: &rukpakv1alpha1.ImageSource{
-							Ref: "testdata/bundles/plain-v0:valid",
+							Ref: "localhost/testdata/bundles/plain-v0:valid",
 						},
 					},
 				},
@@ -263,7 +263,7 @@ var _ = Describe("bundle deployment api validation", func() {
 							Source: rukpakv1alpha1.BundleSource{
 								Type: rukpakv1alpha1.SourceTypeImage,
 								Image: &rukpakv1alpha1.ImageSource{
-									Ref: "testdata/bundles/plain-v0:valid",
+									Ref: "localhost/testdata/bundles/plain-v0:valid",
 								},
 							},
 						},
@@ -308,7 +308,7 @@ var _ = Describe("bundle deployment api validation", func() {
 							Source: rukpakv1alpha1.BundleSource{
 								Type: rukpakv1alpha1.SourceTypeImage,
 								Image: &rukpakv1alpha1.ImageSource{
-									Ref: "testdata/bundles/plain-v0:valid",
+									Ref: "localhost/testdata/bundles/plain-v0:valid",
 								},
 							},
 						},
@@ -350,7 +350,7 @@ var _ = Describe("bundle deployment api validation", func() {
 							Source: rukpakv1alpha1.BundleSource{
 								Type: rukpakv1alpha1.SourceTypeImage,
 								Image: &rukpakv1alpha1.ImageSource{
-									Ref: "testdata/bundles/plain-v0:valid",
+									Ref: "localhost/testdata/bundles/plain-v0:valid",
 								},
 							},
 						},

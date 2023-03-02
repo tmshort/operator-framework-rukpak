@@ -13,7 +13,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	rukpakv1alpha1 "github.com/operator-framework/rukpak/api/v1alpha1"
-	plain "github.com/operator-framework/rukpak/internal/provisioner/plain/types"
+	"github.com/operator-framework/rukpak/internal/provisioner/plain"
 	bundledeployment "github.com/operator-framework/rukpak/internal/updater/bundle-deployment"
 )
 

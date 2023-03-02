@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
-	"io/ioutil"
+	"io"
 	"os"
 	"sort"
 	"time"
@@ -22,6 +22,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/rand"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/cli-runtime/pkg/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -171,16 +172,6 @@ func MapOwneeToOwnerProvisionerHandler(ctx context.Context, cl client.Client, lo
 	})
 }
 
-func MapBundleDeploymentToBundles(ctx context.Context, c client.Client, bd rukpakv1alpha1.BundleDeployment) *rukpakv1alpha1.BundleList {
-	bundles := &rukpakv1alpha1.BundleList{}
-	if err := c.List(ctx, bundles, &client.ListOptions{
-		LabelSelector: NewBundleDeploymentLabelSelector(&bd),
-	}); err != nil {
-		return nil
-	}
-	return bundles
-}
-
 // MapBundleToBundleDeployment is responsible for finding the BundleDeployment resource
 // that's managing this Bundle in the cluster. In the case that this Bundle is a standalone
 // resource, then no BundleDeployment will be returned as static creation of Bundle
@@ -248,11 +239,11 @@ func GetBundlesForBundleDeploymentSelector(ctx context.Context, c client.Client,
 // match the desired Bundle template that's specified in a BundleDeployment object. If a match
 // is found, that Bundle object is returned, so callers are responsible for nil checking the result.
 func CheckExistingBundlesMatchesTemplate(existingBundles *rukpakv1alpha1.BundleList, desiredBundleTemplate *rukpakv1alpha1.BundleTemplate) *rukpakv1alpha1.Bundle {
-	for _, bundle := range existingBundles.Items {
-		if !CheckDesiredBundleTemplate(&bundle, desiredBundleTemplate) {
+	for i := range existingBundles.Items {
+		if !CheckDesiredBundleTemplate(&existingBundles.Items[i], desiredBundleTemplate) {
 			continue
 		}
-		return bundle.DeepCopy()
+		return existingBundles.Items[i].DeepCopy()
 	}
 	return nil
 }
@@ -301,7 +292,7 @@ func SortBundlesByCreation(bundles *rukpakv1alpha1.BundleList) {
 // automatically for Pods at runtime. If that file doesn't exist, then
 // return the @defaultNamespace namespace parameter.
 func PodNamespace(defaultNamespace string) string {
-	namespace, err := ioutil.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
+	namespace, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
 	if err != nil {
 		return defaultNamespace
 	}
@@ -415,4 +406,25 @@ func LoadCertPool(certFile string) (*x509.CertPool, error) {
 		certPool.AddCert(cert)
 	}
 	return certPool, nil
+}
+
+func ManifestObjects(r io.Reader, name string) ([]client.Object, error) {
+	result := resource.NewLocalBuilder().Flatten().Unstructured().Stream(r, name).Do()
+	if err := result.Err(); err != nil {
+		return nil, err
+	}
+	infos, err := result.Infos()
+	if err != nil {
+		return nil, err
+	}
+	return infosToObjects(infos), nil
+}
+
+func infosToObjects(infos []*resource.Info) []client.Object {
+	objects := make([]client.Object, 0, len(infos))
+	for _, info := range infos {
+		clientObject := info.Object.(client.Object)
+		objects = append(objects, clientObject)
+	}
+	return objects
 }

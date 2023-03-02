@@ -42,8 +42,10 @@ import (
 
 	rukpakv1alpha1 "github.com/operator-framework/rukpak/api/v1alpha1"
 	"github.com/operator-framework/rukpak/internal/finalizer"
-	plaincontrollers "github.com/operator-framework/rukpak/internal/provisioner/plain/controllers"
-	registrycontrollers "github.com/operator-framework/rukpak/internal/provisioner/registry/controllers"
+	"github.com/operator-framework/rukpak/internal/provisioner/bundle"
+	"github.com/operator-framework/rukpak/internal/provisioner/bundledeployment"
+	"github.com/operator-framework/rukpak/internal/provisioner/plain"
+	"github.com/operator-framework/rukpak/internal/provisioner/registry"
 	"github.com/operator-framework/rukpak/internal/source"
 	"github.com/operator-framework/rukpak/internal/storage"
 	"github.com/operator-framework/rukpak/internal/uploadmgr"
@@ -82,8 +84,8 @@ func main() {
 	flag.StringVar(&httpExternalAddr, "http-external-address", "http://localhost:8080", "The external address at which the http server is reachable.")
 	flag.StringVar(&bundleCAFile, "bundle-ca-file", "", "The file containing the certificate authority for connecting to bundle content servers.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
-	flag.StringVar(&systemNamespace, "system-namespace", "rukpak-system", "Configures the namespace that gets used to deploy system resources.")
-	flag.StringVar(&unpackImage, "unpack-image", "quay.io/operator-framework/rukpak:latest", "Configures the container image that gets used to unpack Bundle contents.")
+	flag.StringVar(&systemNamespace, "system-namespace", util.DefaultSystemNamespace, "Configures the namespace that gets used to deploy system resources.")
+	flag.StringVar(&unpackImage, "unpack-image", util.DefaultUnpackImage, "Configures the container image that gets used to unpack Bundle contents.")
 	flag.StringVar(&baseUploadManagerURL, "base-upload-manager-url", "", "The base URL from which to fetch uploaded bundles.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
@@ -205,37 +207,44 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&plaincontrollers.BundleReconciler{
-		Client:     mgr.GetClient(),
-		Scheme:     mgr.GetScheme(),
-		Storage:    bundleStorage,
-		Finalizers: bundleFinalizers,
-		Unpacker:   unpacker,
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", rukpakv1alpha1.BundleKind)
-		os.Exit(1)
-	}
-
-	if err = (&registrycontrollers.BundleReconciler{
-		Client:     mgr.GetClient(),
-		Scheme:     mgr.GetScheme(),
-		Storage:    bundleStorage,
-		Finalizers: bundleFinalizers,
-		Unpacker:   unpacker,
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", rukpakv1alpha1.BundleKind)
-		os.Exit(1)
+	commonBundleProvisionerOptions := []bundle.Option{
+		bundle.WithUnpacker(unpacker),
+		bundle.WithFinalizers(bundleFinalizers),
+		bundle.WithStorage(bundleStorage),
 	}
 
 	cfgGetter := helmclient.NewActionConfigGetter(mgr.GetConfig(), mgr.GetRESTMapper(), mgr.GetLogger())
-	if err = (&plaincontrollers.BundleDeploymentReconciler{
-		Client:             mgr.GetClient(),
-		Scheme:             mgr.GetScheme(),
-		BundleStorage:      bundleStorage,
-		ReleaseNamespace:   ns,
-		ActionClientGetter: helmclient.NewActionClientGetter(cfgGetter),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", rukpakv1alpha1.BundleDeploymentKind)
+	acg := helmclient.NewActionClientGetter(cfgGetter)
+	commonBDProvisionerOptions := []bundledeployment.Option{
+		bundledeployment.WithReleaseNamespace(ns),
+		bundledeployment.WithActionClientGetter(acg),
+		bundledeployment.WithStorage(bundleStorage),
+	}
+
+	if err := bundle.SetupProvisioner(mgr, append(
+		commonBundleProvisionerOptions,
+		bundle.WithProvisionerID(plain.ProvisionerID),
+		bundle.WithHandler(bundle.HandlerFunc(plain.HandleBundle)),
+	)...); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", rukpakv1alpha1.BundleKind, "provisionerID", plain.ProvisionerID)
+		os.Exit(1)
+	}
+
+	if err := bundle.SetupProvisioner(mgr, append(
+		commonBundleProvisionerOptions,
+		bundle.WithProvisionerID(registry.ProvisionerID),
+		bundle.WithHandler(bundle.HandlerFunc(registry.HandleBundle)),
+	)...); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", rukpakv1alpha1.BundleKind, "provisionerID", registry.ProvisionerID)
+		os.Exit(1)
+	}
+
+	if err := bundledeployment.SetupProvisioner(mgr, append(
+		commonBDProvisionerOptions,
+		bundledeployment.WithProvisionerID(plain.ProvisionerID),
+		bundledeployment.WithHandler(bundledeployment.HandlerFunc(plain.HandleBundleDeployment)),
+	)...); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", rukpakv1alpha1.BundleDeploymentKind, "provisionerID", plain.ProvisionerID)
 		os.Exit(1)
 	}
 	//+kubebuilder:scaffold:builder

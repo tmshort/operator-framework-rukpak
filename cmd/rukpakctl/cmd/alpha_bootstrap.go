@@ -12,7 +12,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/yaml"
 
-	plain "github.com/operator-framework/rukpak/internal/provisioner/plain/types"
+	"github.com/operator-framework/rukpak/internal/provisioner/plain"
 	"github.com/operator-framework/rukpak/internal/rukpakctl"
 	"github.com/operator-framework/rukpak/internal/util"
 )
@@ -113,8 +113,8 @@ under the management of a rukpak BundleDeployment.'
 			}
 		},
 	}
-	cmd.Flags().StringVar(&systemNamespace, "system-namespace", "rukpak-system", "Namespace in which the core rukpak provisioners are running.")
-	cmd.Flags().StringVar(&uploadServiceName, "upload-service-name", "core", "the name of the service of the upload manager.")
+	cmd.Flags().StringVar(&systemNamespace, "system-namespace", util.DefaultSystemNamespace, "Namespace in which the core rukpak provisioners are running.")
+	cmd.Flags().StringVar(&uploadServiceName, "upload-service-name", util.DefaultUploadServiceName, "the name of the service of the upload manager.")
 	cmd.Flags().StringVar(&caSecretName, "ca-secret-name", "rukpak-ca", "the name of the secret in the system namespace containing the root CAs used to authenticate the upload service.")
 	return cmd
 }

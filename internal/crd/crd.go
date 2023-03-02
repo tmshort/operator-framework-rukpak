@@ -30,10 +30,10 @@ import (
 )
 
 // Validate is a wrapper for doing four things:
-// 	1. Retrieving the existing version of the specified CRD where it exists.
-// 	2. Calling validateCRDCompatibility() on the newCrd.
-// 	3. Calling safeStorageVersionUpgrade() on the newCrd.
-// 	4. Reporting any errors that it encounters along the way.
+//  1. Retrieving the existing version of the specified CRD where it exists.
+//  2. Calling validateCRDCompatibility() on the newCrd.
+//  3. Calling safeStorageVersionUpgrade() on the newCrd.
+//  4. Reporting any errors that it encounters along the way.
 func Validate(ctx context.Context, cl client.Client, newCrd *apiextensionsv1.CustomResourceDefinition) error {
 	oldCRD := &apiextensionsv1.CustomResourceDefinition{}
 
@@ -63,16 +63,16 @@ func Validate(ctx context.Context, cl client.Client, newCrd *apiextensionsv1.Cus
 	return nil
 }
 
-func keys(m map[string]apiextensionsv1.CustomResourceDefinitionVersion) sets.String {
-	return sets.StringKeySet(m)
+func keys(m map[string]apiextensionsv1.CustomResourceDefinitionVersion) sets.Set[string] {
+	return sets.KeySet[string, apiextensionsv1.CustomResourceDefinitionVersion](m)
 }
 
 // validateCRDCompatibility runs through the following cases to test:
-//   1. New CRD removes version that Old CRD had => Must ensure nothing is stored at removed version
-//   2. New CRD changes a version that Old CRD has => Must validate existing CRs with new schema
-//   3. New CRD adds a version that Old CRD does not have =>
-//      - If conversion strategy is None, ensure existing CRs validate with new schema.
-//      - If conversion strategy is Webhook, allow update (assume webhook handles conversion correctly)
+//  1. New CRD removes version that Old CRD had => Must ensure nothing is stored at removed version
+//  2. New CRD changes a version that Old CRD has => Must validate existing CRs with new schema
+//  3. New CRD adds a version that Old CRD does not have =>
+//     - If conversion strategy is None, ensure existing CRs validate with new schema.
+//     - If conversion strategy is Webhook, allow update (assume webhook handles conversion correctly)
 func validateCRDCompatibility(ctx context.Context, cl client.Client, oldCRD *apiextensionsv1.CustomResourceDefinition, newCRD *apiextensionsv1.CustomResourceDefinition) error {
 	oldVersions := map[string]apiextensionsv1.CustomResourceDefinitionVersion{}
 	newVersions := map[string]apiextensionsv1.CustomResourceDefinitionVersion{}
@@ -84,16 +84,16 @@ func validateCRDCompatibility(ctx context.Context, cl client.Client, oldCRD *api
 		newVersions[v.Name] = v
 	}
 
-	existingStoredVersions := sets.NewString(oldCRD.Status.StoredVersions...)
+	existingStoredVersions := sets.New[string](oldCRD.Status.StoredVersions...)
 	removedVersions := keys(oldVersions).Difference(keys(newVersions))
 	invalidRemovedVersions := existingStoredVersions.Intersection(removedVersions)
 	if invalidRemovedVersions.Len() > 0 {
-		return fmt.Errorf("cannot remove stored versions %v", invalidRemovedVersions.List())
+		return fmt.Errorf("cannot remove stored versions %v", sets.List[string](invalidRemovedVersions))
 	}
 
 	similarVersions := keys(oldVersions).Intersection(keys(newVersions))
-	diffVersions := sets.NewString()
-	for _, v := range similarVersions.List() {
+	diffVersions := sets.New[string]()
+	for _, v := range sets.List[string](similarVersions) {
 		if !reflect.DeepEqual(oldVersions[v].Schema, newVersions[v].Schema) {
 			diffVersions.Insert(v)
 		}
@@ -102,7 +102,7 @@ func validateCRDCompatibility(ctx context.Context, cl client.Client, oldCRD *api
 	if err := apiextensionsv1.Convert_v1_CustomResourceDefinition_To_apiextensions_CustomResourceDefinition(newCRD, convertedCRD, nil); err != nil {
 		return err
 	}
-	for _, v := range diffVersions.List() {
+	for _, v := range sets.List[string](diffVersions) {
 		oldV := oldVersions[v]
 		if oldV.Served {
 			listGVK := schema.GroupVersionKind{Group: oldCRD.Spec.Group, Version: v, Kind: oldCRD.Spec.Names.ListKind}
@@ -117,9 +117,9 @@ func validateCRDCompatibility(ctx context.Context, cl client.Client, oldCRD *api
 	// new schema validates all of the existing CRs of the existing versions.
 	addedVersions := keys(newVersions).Difference(keys(oldVersions))
 	if addedVersions.Len() > 0 && (newCRD.Spec.Conversion == nil || newCRD.Spec.Conversion.Strategy == apiextensionsv1.NoneConverter) {
-		for _, va := range addedVersions.List() {
+		for _, va := range sets.List[string](addedVersions) {
 			newV := newVersions[va]
-			for _, vs := range similarVersions.List() {
+			for _, vs := range sets.List[string](similarVersions) {
 				oldV := oldVersions[vs]
 				if oldV.Served {
 					listGVK := schema.GroupVersionKind{Group: oldCRD.Spec.Group, Version: oldV.Name, Kind: oldCRD.Spec.Names.ListKind}
@@ -186,11 +186,11 @@ func safeStorageVersionUpgrade(existingCRD, newCRD *apiextensionsv1.CustomResour
 
 // getStoredVersions returns the storage versions listed in the status of the old on-cluster CRD
 // and all the versions listed in the spec of the new CRD.
-func getStoredVersions(oldCRD, newCRD *apiextensionsv1.CustomResourceDefinition) (sets.String, sets.String) {
-	newSpecVersions := sets.NewString()
+func getStoredVersions(oldCRD, newCRD *apiextensionsv1.CustomResourceDefinition) (sets.Set[string], sets.Set[string]) {
+	newSpecVersions := sets.New[string]()
 	for _, version := range newCRD.Spec.Versions {
 		newSpecVersions.Insert(version.Name)
 	}
 
-	return sets.NewString(oldCRD.Status.StoredVersions...), newSpecVersions
+	return sets.New[string](oldCRD.Status.StoredVersions...), newSpecVersions
 }
