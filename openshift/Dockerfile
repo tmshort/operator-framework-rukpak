@@ -17,6 +17,7 @@ COPY --from=builder /build/bin/webhooks /
 COPY --from=builder /build/bin/helm /
 COPY --from=builder /build/bin/crdvalidator /
 COPY --from=builder /build/bin/rukpakctl /
+COPY openshift/manifests /openshift/manifests
 USER 1001
 
 LABEL io.k8s.display-name="OpenShift RukPak" \
