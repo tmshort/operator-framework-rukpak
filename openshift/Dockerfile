@@ -5,6 +5,10 @@ COPY .git/HEAD .git/HEAD
 COPY .git/refs/heads/. .git/refs/heads
 RUN mkdir -p .git/objects
 
+# Permit the unpack binary to be compiled statically. The Red Hat compiler
+# provided by ART will otherwise force FIPS compliant dynamic compilation.
+ENV GO_COMPLIANCE_EXCLUDE="build.*cmd/unpack"
+
 WORKDIR /build
 COPY . .
 RUN make build
