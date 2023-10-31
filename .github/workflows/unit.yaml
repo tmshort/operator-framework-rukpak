@@ -2,6 +2,7 @@ name: unit
 
 on:
   workflow_dispatch:
+  merge_group:
   pull_request:
   push:
     branches:
@@ -11,7 +12,7 @@ jobs:
   unit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: actions/setup-go@v4
         with:
           go-version-file: "go.mod"
@@ -20,5 +21,4 @@ jobs:
       - uses: codecov/codecov-action@v3
         with:
           files: cover.out
-          fail_ci_if_error: true
           functionalities: fixes

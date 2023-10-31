@@ -57,6 +57,7 @@ spec:
             - --upload-storage-dir=/var/cache/uploads
             - --http-bind-address=127.0.0.1:8080
             - --http-external-address=https://core.openshift-rukpak.svc
+            - --feature-gates=BundleDeploymentHealth=true
             - --bundle-ca-file=/etc/configmaps/ca-bundle/service-ca.crt
           command:
             - /core
