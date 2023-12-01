@@ -21,7 +21,7 @@ var sampleSpec = rukpakv1alpha1.BundleSpec{
 func TestCheckDesiredBundleTemplate(t *testing.T) {
 	type args struct {
 		existingBundle *rukpakv1alpha1.Bundle
-		desiredBundle  *rukpakv1alpha1.BundleTemplate
+		desiredBundle  rukpakv1alpha1.BundleTemplate
 	}
 	tests := []struct {
 		name string
@@ -40,7 +40,7 @@ func TestCheckDesiredBundleTemplate(t *testing.T) {
 					},
 					Spec: sampleSpec,
 				},
-				desiredBundle: &rukpakv1alpha1.BundleTemplate{
+				desiredBundle: rukpakv1alpha1.BundleTemplate{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "stub",
 						Labels: map[string]string{
@@ -66,7 +66,7 @@ func TestCheckDesiredBundleTemplate(t *testing.T) {
 						ProvisionerClassName: "non-existent-provisioner-class-name",
 					},
 				},
-				desiredBundle: &rukpakv1alpha1.BundleTemplate{
+				desiredBundle: rukpakv1alpha1.BundleTemplate{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "stub",
 						Labels: map[string]string{
@@ -90,7 +90,7 @@ func TestCheckDesiredBundleTemplate(t *testing.T) {
 					},
 					Spec: sampleSpec,
 				},
-				desiredBundle: &rukpakv1alpha1.BundleTemplate{
+				desiredBundle: rukpakv1alpha1.BundleTemplate{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "stub",
 						Labels: map[string]string{
@@ -117,7 +117,7 @@ func TestCheckDesiredBundleTemplate(t *testing.T) {
 					},
 					Spec: sampleSpec,
 				},
-				desiredBundle: &rukpakv1alpha1.BundleTemplate{
+				desiredBundle: rukpakv1alpha1.BundleTemplate{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "stub",
 						Labels: map[string]string{
@@ -144,7 +144,7 @@ func TestCheckDesiredBundleTemplate(t *testing.T) {
 					},
 					Spec: sampleSpec,
 				},
-				desiredBundle: &rukpakv1alpha1.BundleTemplate{
+				desiredBundle: rukpakv1alpha1.BundleTemplate{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "stub-123",
 						Labels: map[string]string{
@@ -163,8 +163,12 @@ func TestCheckDesiredBundleTemplate(t *testing.T) {
 			// Dynamically inject the bundle template hash at runtime into the tests.
 			// This is due to the nature of the objects being passed in (pointers to BundleTemplates) being represented
 			// differently on different platforms, so hardcoding the hash values produces inconsistent results.
-			injectTemplateHashLabel(tt.args.existingBundle, tt.args.desiredBundle, tt.want)
-			if got := CheckDesiredBundleTemplate(tt.args.existingBundle, tt.args.desiredBundle); got != tt.want {
+			injectTemplateHashLabel(t, tt.args.existingBundle, tt.args.desiredBundle, tt.want)
+			got, err := CheckDesiredBundleTemplate(tt.args.existingBundle, tt.args.desiredBundle)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tt.want {
 				t.Errorf("CheckDesiredBundleTemplate() = %v, want %v", got, tt.want)
 			}
 		})
@@ -180,10 +184,14 @@ func injectCoreLabels(bundle *rukpakv1alpha1.Bundle) {
 	labels[CoreOwnerNameKey] = ""
 }
 
-func injectTemplateHashLabel(bundle *rukpakv1alpha1.Bundle, template *rukpakv1alpha1.BundleTemplate, want bool) {
+func injectTemplateHashLabel(t *testing.T, bundle *rukpakv1alpha1.Bundle, template rukpakv1alpha1.BundleTemplate, want bool) {
 	labels := bundle.GetLabels()
 	if want {
-		labels[CoreBundleTemplateHashKey] = GenerateTemplateHash(template)
+		hash, err := DeepHashObject(template)
+		if err != nil {
+			t.Fatal(err)
+		}
+		labels[CoreBundleTemplateHashKey] = hash
 	} else {
 		labels[CoreBundleTemplateHashKey] = "00000000"
 	}

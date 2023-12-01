@@ -1,0 +1,4 @@
+expectedMergeBase: b4e9976e748299623d5e2548c7bf1b3a0c40edf1
+upstreamBranch: main
+upstreamOrg: operator-framework
+upstreamRepo: rukpak

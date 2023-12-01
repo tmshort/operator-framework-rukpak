@@ -1394,7 +1394,7 @@ var _ = Describe("plain provisioner bundledeployment", func() {
 				},
 				Spec: rukpakv1alpha1.BundleDeploymentSpec{
 					ProvisionerClassName: plain.ProvisionerID,
-					Template: &rukpakv1alpha1.BundleTemplate{
+					Template: rukpakv1alpha1.BundleTemplate{
 						Spec: rukpakv1alpha1.BundleSpec{
 							ProvisionerClassName: plain.ProvisionerID,
 							Source: rukpakv1alpha1.BundleSource{
@@ -1522,7 +1522,11 @@ var _ = Describe("plain provisioner bundledeployment", func() {
 					util.SortBundlesByCreation(existingBundles)
 					// Note: existing bundles are sorted by metadata.CreationTimestamp, so select
 					// the Bundle that was generated second to compare to the desired Bundle template.
-					return util.CheckDesiredBundleTemplate(&existingBundles.Items[1], bd.Spec.Template)
+					ok, err := util.CheckDesiredBundleTemplate(&existingBundles.Items[1], bd.Spec.Template)
+					if err != nil {
+						return false
+					}
+					return ok
 				}).Should(BeTrue())
 			})
 
@@ -1594,7 +1598,11 @@ var _ = Describe("plain provisioner bundledeployment", func() {
 					if err := c.Get(ctx, types.NamespacedName{Name: bd.Status.ActiveBundle}, currBundle); err != nil {
 						return false
 					}
-					return util.CheckDesiredBundleTemplate(currBundle, bd.Spec.Template)
+					ok, err := util.CheckDesiredBundleTemplate(currBundle, bd.Spec.Template)
+					if err != nil {
+						return false
+					}
+					return ok
 				}).Should(BeTrue())
 			})
 			It("should delete the old Bundle once the newly generated Bundle reports a successful installation state", func() {
@@ -1636,7 +1644,7 @@ var _ = Describe("plain provisioner bundledeployment", func() {
 				},
 				Spec: rukpakv1alpha1.BundleDeploymentSpec{
 					ProvisionerClassName: plain.ProvisionerID,
-					Template: &rukpakv1alpha1.BundleTemplate{
+					Template: rukpakv1alpha1.BundleTemplate{
 						ObjectMeta: metav1.ObjectMeta{
 							Labels: map[string]string{
 								"app.kubernetes.io/name": "olm-crds",
@@ -1695,7 +1703,7 @@ var _ = Describe("plain provisioner bundledeployment", func() {
 				},
 				Spec: rukpakv1alpha1.BundleDeploymentSpec{
 					ProvisionerClassName: plain.ProvisionerID,
-					Template: &rukpakv1alpha1.BundleTemplate{
+					Template: rukpakv1alpha1.BundleTemplate{
 						ObjectMeta: metav1.ObjectMeta{
 							Labels: map[string]string{
 								"app.kubernetes.io/name": "olm-apis",
@@ -1774,7 +1782,7 @@ var _ = Describe("plain provisioner bundledeployment", func() {
 				},
 				Spec: rukpakv1alpha1.BundleDeploymentSpec{
 					ProvisionerClassName: plain.ProvisionerID,
-					Template: &rukpakv1alpha1.BundleTemplate{
+					Template: rukpakv1alpha1.BundleTemplate{
 						ObjectMeta: metav1.ObjectMeta{
 							Labels: map[string]string{
 								"app.kubernetes.io/name": "olm-apis",
@@ -1838,7 +1846,7 @@ var _ = Describe("plain provisioner bundledeployment", func() {
 				},
 				Spec: rukpakv1alpha1.BundleDeploymentSpec{
 					ProvisionerClassName: plain.ProvisionerID,
-					Template: &rukpakv1alpha1.BundleTemplate{
+					Template: rukpakv1alpha1.BundleTemplate{
 						ObjectMeta: metav1.ObjectMeta{
 							Labels: map[string]string{
 								"app.kubernetes.io/name": "e2e-dependent-bundle",
@@ -1895,7 +1903,7 @@ var _ = Describe("plain provisioner bundledeployment", func() {
 					},
 					Spec: rukpakv1alpha1.BundleDeploymentSpec{
 						ProvisionerClassName: plain.ProvisionerID,
-						Template: &rukpakv1alpha1.BundleTemplate{
+						Template: rukpakv1alpha1.BundleTemplate{
 							ObjectMeta: metav1.ObjectMeta{
 								Labels: map[string]string{
 									"app.kubernetes.io/name": "e2e-bundle-providing",
@@ -1956,7 +1964,7 @@ var _ = Describe("plain provisioner bundledeployment", func() {
 				},
 				Spec: rukpakv1alpha1.BundleDeploymentSpec{
 					ProvisionerClassName: plain.ProvisionerID,
-					Template: &rukpakv1alpha1.BundleTemplate{
+					Template: rukpakv1alpha1.BundleTemplate{
 						ObjectMeta: metav1.ObjectMeta{
 							Labels: map[string]string{
 								"app.kubernetes.io/name": "e2e-bundle-crds-and-crs",
@@ -2090,7 +2098,7 @@ var _ = Describe("plain provisioner garbage collection", func() {
 				},
 				Spec: rukpakv1alpha1.BundleDeploymentSpec{
 					ProvisionerClassName: plain.ProvisionerID,
-					Template: &rukpakv1alpha1.BundleTemplate{
+					Template: rukpakv1alpha1.BundleTemplate{
 						ObjectMeta: metav1.ObjectMeta{
 							Labels: labels,
 						},
@@ -2182,7 +2190,7 @@ var _ = Describe("plain provisioner garbage collection", func() {
 				},
 				Spec: rukpakv1alpha1.BundleDeploymentSpec{
 					ProvisionerClassName: plain.ProvisionerID,
-					Template: &rukpakv1alpha1.BundleTemplate{
+					Template: rukpakv1alpha1.BundleTemplate{
 						ObjectMeta: metav1.ObjectMeta{
 							Labels: map[string]string{
 								"app.kubernetes.io/name": "e2e-ownerref-bundle-valid",
