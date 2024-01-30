@@ -37,10 +37,6 @@ type Options struct {
 	// LargeObjectThreshold maximum object size (in bytes) that will be read in to memory.
 	// If left unset or set to 0 there is no limit
 	LargeObjectThreshold int64
-	// AlternatesFS provides the billy filesystem to be used for Git Alternates.
-	// If none is provided, it falls back to using the underlying instance used for
-	// DotGit.
-	AlternatesFS billy.Filesystem
 }
 
 // NewStorage returns a new Storage backed by a given `fs.Filesystem` and cache.
@@ -53,7 +49,6 @@ func NewStorage(fs billy.Filesystem, cache cache.Object) *Storage {
 func NewStorageWithOptions(fs billy.Filesystem, cache cache.Object, ops Options) *Storage {
 	dirOps := dotgit.Options{
 		ExclusiveAccess: ops.ExclusiveAccess,
-		AlternatesFS:    ops.AlternatesFS,
 	}
 	dir := dotgit.NewWithOptions(fs, dirOps)
 
@@ -78,8 +73,4 @@ func (s *Storage) Filesystem() billy.Filesystem {
 // Init initializes .git directory
 func (s *Storage) Init() error {
 	return s.dir.Initialize()
-}
-
-func (s *Storage) AddAlternate(remote string) error {
-	return s.dir.AddAlternate(remote)
 }

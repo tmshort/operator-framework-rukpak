@@ -2,11 +2,12 @@
 package git
 
 import (
+	"fmt"
 	"io"
 	"net"
 	"strconv"
 
-	"github.com/go-git/go-git/v5/plumbing/protocol/packp"
+	"github.com/go-git/go-git/v5/plumbing/format/pktline"
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/go-git/go-git/v5/plumbing/transport/internal/common"
 	"github.com/go-git/go-git/v5/utils/ioutil"
@@ -41,18 +42,10 @@ type command struct {
 
 // Start executes the command sending the required message to the TCP connection
 func (c *command) Start() error {
-	req := packp.GitProtoRequest{
-		RequestCommand: c.command,
-		Pathname:       c.endpoint.Path,
-	}
-	host := c.endpoint.Host
-	if c.endpoint.Port != DefaultPort {
-		host = net.JoinHostPort(c.endpoint.Host, strconv.Itoa(c.endpoint.Port))
-	}
+	cmd := endpointToCommand(c.command, c.endpoint)
 
-	req.Host = host
-
-	return req.Encode(c.conn)
+	e := pktline.NewEncoder(c.conn)
+	return e.Encode([]byte(cmd))
 }
 
 func (c *command) connect() error {
@@ -95,6 +88,15 @@ func (c *command) StdinPipe() (io.WriteCloser, error) {
 // StdoutPipe returns the underlying connection as Reader
 func (c *command) StdoutPipe() (io.Reader, error) {
 	return c.conn, nil
+}
+
+func endpointToCommand(cmd string, ep *transport.Endpoint) string {
+	host := ep.Host
+	if ep.Port != DefaultPort {
+		host = net.JoinHostPort(ep.Host, strconv.Itoa(ep.Port))
+	}
+
+	return fmt.Sprintf("%s %s%chost=%s%c", cmd, ep.Path, 0, host, 0)
 }
 
 // Close closes the TCP connection and connection.

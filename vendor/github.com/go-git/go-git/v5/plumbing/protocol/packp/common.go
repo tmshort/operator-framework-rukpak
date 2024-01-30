@@ -48,11 +48,6 @@ func isFlush(payload []byte) bool {
 	return len(payload) == 0
 }
 
-var (
-	// ErrNilWriter is returned when a nil writer is passed to the encoder.
-	ErrNilWriter = fmt.Errorf("nil writer")
-)
-
 // ErrUnexpectedData represents an unexpected data decoding a message
 type ErrUnexpectedData struct {
 	Msg  string
