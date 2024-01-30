@@ -168,7 +168,7 @@ func dial(network, addr string, proxyOpts transport.ProxyOptions, config *ssh.Cl
 	defer cancel()
 
 	var conn net.Conn
-	var dialErr error
+	var err error
 
 	if proxyOpts.URL != "" {
 		proxyUrl, err := proxyOpts.FullURL()
@@ -186,12 +186,12 @@ func dial(network, addr string, proxyOpts transport.ProxyOptions, config *ssh.Cl
 			return nil, fmt.Errorf("expected ssh proxy dialer to be of type %s; got %s",
 				reflect.TypeOf(ctxDialer), reflect.TypeOf(dialer))
 		}
-		conn, dialErr = ctxDialer.DialContext(ctx, "tcp", addr)
+		conn, err = ctxDialer.DialContext(ctx, "tcp", addr)
 	} else {
-		conn, dialErr = proxy.Dial(ctx, network, addr)
+		conn, err = proxy.Dial(ctx, network, addr)
 	}
-	if dialErr != nil {
-		return nil, dialErr
+	if err != nil {
+		return nil, err
 	}
 
 	c, chans, reqs, err := ssh.NewClientConn(conn, addr, config)
