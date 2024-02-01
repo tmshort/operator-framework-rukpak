@@ -17,8 +17,10 @@ import (
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	rukpakv1alpha1 "github.com/operator-framework/rukpak/api/v1alpha1"
+	rukpakv1alpha2 "github.com/operator-framework/rukpak/api/v1alpha2"
 )
 
 var (
@@ -28,6 +30,8 @@ var (
 )
 
 func TestE2E(t *testing.T) {
+	log.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
+
 	RegisterFailHandler(Fail)
 	SetDefaultEventuallyTimeout(1 * time.Minute)
 	SetDefaultEventuallyPollingInterval(1 * time.Second)
@@ -38,7 +42,7 @@ var _ = BeforeSuite(func() {
 	cfg = ctrl.GetConfigOrDie()
 
 	scheme := runtime.NewScheme()
-	Expect(rukpakv1alpha1.AddToScheme(scheme)).To(Succeed())
+	Expect(rukpakv1alpha2.AddToScheme(scheme)).To(Succeed())
 	Expect(rbacv1.AddToScheme(scheme)).To(Succeed())
 	Expect(batchv1.AddToScheme(scheme)).To(Succeed())
 	Expect(operatorsv1.AddToScheme(scheme)).To(Succeed())

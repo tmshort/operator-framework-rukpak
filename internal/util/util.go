@@ -8,14 +8,12 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
 	"time"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/selection"
@@ -29,11 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	rukpakv1alpha1 "github.com/operator-framework/rukpak/api/v1alpha1"
-)
-
-const (
-	maxGeneratedBundleLimit = 4
+	rukpakv1alpha2 "github.com/operator-framework/rukpak/api/v1alpha2"
 )
 
 var (
@@ -43,73 +37,9 @@ var (
 	ErrMaxGeneratedLimit = errors.New("reached the maximum generated Bundle limit")
 )
 
-// reconcileDesiredBundle is responsible for checking whether the desired
-// Bundle resource that's specified in the BundleDeployment parameter's
-// spec.Template configuration is present on cluster, and if not, creates
-// a new Bundle resource matching that desired specification.
-func ReconcileDesiredBundle(ctx context.Context, c client.Client, bd *rukpakv1alpha1.BundleDeployment) (*rukpakv1alpha1.Bundle, *rukpakv1alpha1.BundleList, error) {
-	// get the set of Bundle resources that already exist on cluster, and sort
-	// by metadata.CreationTimestamp in the case there's multiple Bundles
-	// that match the label selector.
-	existingBundles, err := GetBundlesForBundleDeploymentSelector(ctx, c, bd)
-	if err != nil {
-		return nil, nil, err
-	}
-	SortBundlesByCreation(existingBundles)
-
-	// check whether the BI controller has already reached the maximum
-	// generated Bundle limit to avoid hotlooping scenarios.
-	if len(existingBundles.Items) > maxGeneratedBundleLimit {
-		return nil, nil, ErrMaxGeneratedLimit
-	}
-
-	// check whether there's an existing Bundle that matches the desired Bundle template
-	// specified in the BI resource, and if not, generate a new Bundle that matches the template.
-	b, err := CheckExistingBundlesMatchesTemplate(existingBundles, bd.Spec.Template)
-	if err != nil {
-		return nil, nil, err
-	}
-	if b == nil {
-		controllerRef := metav1.NewControllerRef(bd, bd.GroupVersionKind())
-		hash, err := DeepHashObject(bd.Spec.Template)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		labels := bd.Spec.Template.Labels
-		if len(labels) == 0 {
-			labels = make(map[string]string)
-		}
-		labels[CoreOwnerKindKey] = rukpakv1alpha1.BundleDeploymentKind
-		labels[CoreOwnerNameKey] = bd.GetName()
-		labels[CoreBundleTemplateHashKey] = hash
-
-		b = &rukpakv1alpha1.Bundle{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:            GenerateBundleName(bd.GetName(), hash),
-				OwnerReferences: []metav1.OwnerReference{*controllerRef},
-				Labels:          labels,
-				Annotations:     bd.Spec.Template.Annotations,
-			},
-			Spec: bd.Spec.Template.Spec,
-		}
-		if err := c.Create(ctx, b); err != nil {
-			return nil, nil, err
-		}
-	}
-	return b, existingBundles, err
-}
-
-func BundleProvisionerFilter(provisionerClassName string) predicate.Predicate {
-	return predicate.NewPredicateFuncs(func(obj client.Object) bool {
-		b := obj.(*rukpakv1alpha1.Bundle)
-		return b.Spec.ProvisionerClassName == provisionerClassName
-	})
-}
-
 func BundleDeploymentProvisionerFilter(provisionerClassName string) predicate.Predicate {
 	return predicate.NewPredicateFuncs(func(obj client.Object) bool {
-		b := obj.(*rukpakv1alpha1.BundleDeployment)
+		b := obj.(*rukpakv1alpha2.BundleDeployment)
 		return b.Spec.ProvisionerClassName == provisionerClassName
 	})
 }
@@ -122,8 +52,8 @@ type ProvisionerClassNameGetter interface {
 // MapOwneeToOwnerProvisionerHandler is a handler implementation that finds an owner reference in the event object that
 // references the provided owner. If a reference for the provided owner is found AND that owner's provisioner class name
 // matches the provided provisionerClassName, this handler enqueues a request for that owner to be reconciled.
-func MapOwneeToOwnerProvisionerHandler(ctx context.Context, cl client.Client, log logr.Logger, provisionerClassName string, owner ProvisionerClassNameGetter) handler.EventHandler {
-	return handler.EnqueueRequestsFromMapFunc(func(obj client.Object) []reconcile.Request {
+func MapOwneeToOwnerProvisionerHandler(cl client.Client, log logr.Logger, provisionerClassName string, owner ProvisionerClassNameGetter) handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
 		ownerGVK, err := apiutil.GVKForObject(owner, cl.Scheme())
 		if err != nil {
 			log.Error(err, "map ownee to owner: lookup GVK for owner")
@@ -177,61 +107,13 @@ func MapOwneeToOwnerProvisionerHandler(ctx context.Context, cl client.Client, lo
 	})
 }
 
-// MapBundleToBundleDeployment is responsible for finding the BundleDeployment resource
-// that's managing this Bundle in the cluster. In the case that this Bundle is a standalone
-// resource, then no BundleDeployment will be returned as static creation of Bundle
-// resources is not a supported workflow right now.
-func MapBundleToBundleDeployment(ctx context.Context, c client.Client, b rukpakv1alpha1.Bundle) *rukpakv1alpha1.BundleDeployment {
-	// check whether this is a standalone bundle that was created outside
-	// of the normal BundleDeployment controller reconciliation process.
-	if bundleOwnerType := b.Labels[CoreOwnerKindKey]; bundleOwnerType != rukpakv1alpha1.BundleDeploymentKind {
+func MapConfigMapToBundleDeployment(ctx context.Context, cl client.Client, cmNamespace string, cm corev1.ConfigMap) []*rukpakv1alpha2.BundleDeployment {
+	bundleDeploymentList := &rukpakv1alpha2.BundleDeploymentList{}
+	if err := cl.List(ctx, bundleDeploymentList); err != nil {
 		return nil
 	}
-	bundleOwnerName := b.Labels[CoreOwnerNameKey]
-	if bundleOwnerName == "" {
-		return nil
-	}
-
-	bundleDeployments := &rukpakv1alpha1.BundleDeploymentList{}
-	if err := c.List(ctx, bundleDeployments); err != nil {
-		return nil
-	}
-	for _, bd := range bundleDeployments.Items {
-		bd := bd
-
-		if bd.GetName() == bundleOwnerName {
-			return bd.DeepCopy()
-		}
-	}
-	return nil
-}
-
-// MapBundleToBundleDeploymentHandler is responsible for requeuing a BundleDeployment resource
-// when a new Bundle event has been encountered. In the case that the Bundle resource is a
-// standalone resource, then no BundleDeployment will be returned as static creation of Bundle
-// resources is not a supported workflow right now. The provisionerClassName parameter is used
-// to filter out BundleDeployments that the caller shouldn't be watching.
-func MapBundleToBundleDeploymentHandler(ctx context.Context, cl client.Client, provisionerClassName string) handler.MapFunc {
-	return func(object client.Object) []reconcile.Request {
-		b := object.(*rukpakv1alpha1.Bundle)
-
-		managingBD := MapBundleToBundleDeployment(ctx, cl, *b)
-		if managingBD == nil {
-			return nil
-		}
-		if managingBD.Spec.ProvisionerClassName != provisionerClassName {
-			return nil
-		}
-		return []reconcile.Request{{NamespacedName: client.ObjectKeyFromObject(managingBD)}}
-	}
-}
-func MapConfigMapToBundles(ctx context.Context, cl client.Client, cmNamespace string, cm corev1.ConfigMap) []*rukpakv1alpha1.Bundle {
-	bundleList := &rukpakv1alpha1.BundleList{}
-	if err := cl.List(ctx, bundleList); err != nil {
-		return nil
-	}
-	var bs []*rukpakv1alpha1.Bundle
-	for _, b := range bundleList.Items {
+	var bs []*rukpakv1alpha2.BundleDeployment
+	for _, b := range bundleDeploymentList.Items {
 		b := b
 		for _, cmSource := range b.Spec.Source.ConfigMaps {
 			cmName := cmSource.ConfigMap.Name
@@ -242,12 +124,13 @@ func MapConfigMapToBundles(ctx context.Context, cl client.Client, cmNamespace st
 	}
 	return bs
 }
-func MapConfigMapToBundlesHandler(ctx context.Context, cl client.Client, configMapNamespace string, provisionerClassName string) handler.EventHandler {
-	return handler.EnqueueRequestsFromMapFunc(func(object client.Object) []reconcile.Request {
+
+func MapConfigMapToBundleDeploymentHandler(cl client.Client, configMapNamespace string, provisionerClassName string) handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, object client.Object) []reconcile.Request {
 		cm := object.(*corev1.ConfigMap)
 		var requests []reconcile.Request
-		matchingBundles := MapConfigMapToBundles(ctx, cl, configMapNamespace, *cm)
-		for _, b := range matchingBundles {
+		matchingBundleDeployment := MapConfigMapToBundleDeployment(ctx, cl, configMapNamespace, *cm)
+		for _, b := range matchingBundleDeployment {
 			if b.Spec.ProvisionerClassName != provisionerClassName {
 				continue
 			}
@@ -255,61 +138,6 @@ func MapConfigMapToBundlesHandler(ctx context.Context, cl client.Client, configM
 		}
 		return requests
 	})
-}
-
-// GetBundlesForBundleDeploymentSelector is responsible for returning a list of
-// Bundle resource that exist on cluster that match the label selector specified
-// in the BD parameter's spec.Selector field.
-func GetBundlesForBundleDeploymentSelector(ctx context.Context, c client.Client, bd *rukpakv1alpha1.BundleDeployment) (*rukpakv1alpha1.BundleList, error) {
-	selector := NewBundleDeploymentLabelSelector(bd)
-	bundleList := &rukpakv1alpha1.BundleList{}
-	if err := c.List(ctx, bundleList, &client.ListOptions{
-		LabelSelector: selector,
-	}); err != nil {
-		return nil, fmt.Errorf("failed to list bundles using the %s selector: %v", selector.String(), err)
-	}
-	return bundleList, nil
-}
-
-// CheckExistingBundlesMatchesTemplate evaluates whether the existing list of Bundle objects
-// match the desired Bundle template that's specified in a BundleDeployment object. If a match
-// is found, that Bundle object is returned, so callers are responsible for nil checking the result.
-func CheckExistingBundlesMatchesTemplate(existingBundles *rukpakv1alpha1.BundleList, desiredBundleTemplate rukpakv1alpha1.BundleTemplate) (*rukpakv1alpha1.Bundle, error) {
-	for i := range existingBundles.Items {
-		ok, err := CheckDesiredBundleTemplate(&existingBundles.Items[i], desiredBundleTemplate)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			continue
-		}
-		return existingBundles.Items[i].DeepCopy(), nil
-	}
-	return nil, nil
-}
-
-// CheckDesiredBundleTemplate is responsible for determining whether the existingBundle
-// hash is equal to the desiredBundle Bundle template hash.
-func CheckDesiredBundleTemplate(existingBundle *rukpakv1alpha1.Bundle, desiredBundle rukpakv1alpha1.BundleTemplate) (bool, error) {
-	if len(existingBundle.Labels) == 0 {
-		// Existing Bundle has no labels set, which should never be the case.
-		// Return false so that the Bundle is forced to be recreated with the expected labels.
-		return false, nil
-	}
-
-	existingHash, ok := existingBundle.Labels[CoreBundleTemplateHashKey]
-	if !ok {
-		// Existing Bundle has no template hash associated with it.
-		// Return false so that the Bundle is forced to be recreated with the template hash label.
-		return false, nil
-	}
-
-	// Check whether the hash of the desired bundle template matches the existing bundle on-cluster.
-	desiredHash, err := DeepHashObject(desiredBundle)
-	if err != nil {
-		return false, err
-	}
-	return existingHash == desiredHash, nil
 }
 
 const (
@@ -333,14 +161,6 @@ func GenerateBundleName(bdName, hash string) string {
 		hash = hash[:maxBundleNameLength-len(bdName)-1]
 	}
 	return fmt.Sprintf("%s-%s", bdName, hash)
-}
-
-// SortBundlesByCreation sorts a BundleList's items by it's
-// metadata.CreationTimestamp value.
-func SortBundlesByCreation(bundles *rukpakv1alpha1.BundleList) {
-	sort.Slice(bundles.Items, func(a, b int) bool {
-		return bundles.Items[a].CreationTimestamp.Before(&bundles.Items[b].CreationTimestamp)
-	})
 }
 
 // PodNamespace checks whether the controller is running in a Pod vs.
@@ -367,16 +187,10 @@ func newLabelSelector(name, kind string) labels.Selector {
 	return labels.NewSelector().Add(*kindRequirement, *nameRequirement)
 }
 
-// NewBundleLabelSelector is responsible for constructing a label.Selector
-// for any underlying resources that are associated with the Bundle parameter.
-func NewBundleLabelSelector(bundle *rukpakv1alpha1.Bundle) labels.Selector {
-	return newLabelSelector(bundle.GetName(), rukpakv1alpha1.BundleKind)
-}
-
 // NewBundleDeploymentLabelSelector is responsible for constructing a label.Selector
 // for any underlying resources that are associated with the BundleDeployment parameter.
-func NewBundleDeploymentLabelSelector(bd *rukpakv1alpha1.BundleDeployment) labels.Selector {
-	return newLabelSelector(bd.GetName(), rukpakv1alpha1.BundleDeploymentKind)
+func NewBundleDeploymentLabelSelector(bd *rukpakv1alpha2.BundleDeployment) labels.Selector {
+	return newLabelSelector(bd.GetName(), rukpakv1alpha2.BundleDeploymentKind)
 }
 
 func CreateOrRecreate(ctx context.Context, cl client.Client, obj client.Object, f controllerutil.MutateFn) (controllerutil.OperationResult, error) {
@@ -403,15 +217,15 @@ func CreateOrRecreate(ctx context.Context, cl client.Client, obj client.Object, 
 		return controllerutil.OperationResultNone, nil
 	}
 
-	if err := wait.PollImmediateUntil(time.Millisecond*5, func() (bool, error) {
-		if err := cl.Delete(ctx, obj); err != nil {
+	if err := wait.PollUntilContextCancel(ctx, time.Millisecond*5, true, func(conditionCtx context.Context) (bool, error) {
+		if err := cl.Delete(conditionCtx, obj); err != nil {
 			if apierrors.IsNotFound(err) {
 				return true, nil
 			}
 			return false, err
 		}
 		return false, nil
-	}, ctx.Done()); err != nil {
+	}); err != nil {
 		return controllerutil.OperationResultNone, err
 	}
 

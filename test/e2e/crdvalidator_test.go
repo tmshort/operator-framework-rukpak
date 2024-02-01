@@ -8,7 +8,7 @@ import (
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	rukpakv1alpha1 "github.com/operator-framework/rukpak/api/v1alpha1"
+	rukpakv1alpha2 "github.com/operator-framework/rukpak/api/v1alpha2"
 	"github.com/operator-framework/rukpak/cmd/crdvalidator/annotation"
 	"github.com/operator-framework/rukpak/internal/util"
 	"github.com/operator-framework/rukpak/test/testutil"
@@ -95,7 +95,7 @@ var _ = Describe("crdvalidator", func() {
 						},
 					})
 
-					crd.Labels = map[string]string{util.CoreOwnerKindKey: rukpakv1alpha1.BundleDeploymentKind}
+					crd.Labels = map[string]string{util.CoreOwnerKindKey: rukpakv1alpha2.BundleDeploymentKind}
 
 					return c.Update(ctx, crd)
 				}).Should(Succeed())
@@ -123,7 +123,7 @@ var _ = Describe("crdvalidator", func() {
 					}},
 				)
 
-				crd.Labels = map[string]string{util.CoreOwnerKindKey: rukpakv1alpha1.BundleDeploymentKind}
+				crd.Labels = map[string]string{util.CoreOwnerKindKey: rukpakv1alpha2.BundleDeploymentKind}
 
 				Eventually(func() error {
 					return c.Create(ctx, crd)
@@ -195,7 +195,7 @@ var _ = Describe("crdvalidator", func() {
 		})
 
 		// TODO (tylerslaton): Check CRDValidator safe storage logic
-		//
+
 		// This test is currently trying to simulate a situtation where an incoming
 		// CRD removes a stored version. However, it does not work as expected because
 		// something (potentially the apiserver) is intervening first and not allowing

@@ -24,7 +24,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"time"
 
 	"github.com/gorilla/handlers"
 	helmclient "github.com/operator-framework/helm-operator-plugins/pkg/client"
@@ -38,20 +37,19 @@ import (
 	"k8s.io/kube-aggregator/pkg/apis/apiregistration"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
-	"sigs.k8s.io/controller-runtime/pkg/cluster"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	crfinalizer "sigs.k8s.io/controller-runtime/pkg/finalizer"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	rukpakv1alpha1 "github.com/operator-framework/rukpak/api/v1alpha1"
-	"github.com/operator-framework/rukpak/internal/controllers/bundle"
+	rukpakv1alpha2 "github.com/operator-framework/rukpak/api/v1alpha2"
 	"github.com/operator-framework/rukpak/internal/controllers/bundledeployment"
 	"github.com/operator-framework/rukpak/internal/finalizer"
 	"github.com/operator-framework/rukpak/internal/provisioner/plain"
 	"github.com/operator-framework/rukpak/internal/provisioner/registry"
 	"github.com/operator-framework/rukpak/internal/source"
 	"github.com/operator-framework/rukpak/internal/storage"
-	"github.com/operator-framework/rukpak/internal/uploadmgr"
 	"github.com/operator-framework/rukpak/internal/util"
 	"github.com/operator-framework/rukpak/internal/version"
 	"github.com/operator-framework/rukpak/pkg/features"
@@ -65,7 +63,7 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(apiextensionsv1.AddToScheme(scheme))
-	utilruntime.Must(rukpakv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(rukpakv1alpha2.AddToScheme(scheme))
 	utilruntime.Must(apiregistration.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
 }
@@ -79,11 +77,8 @@ func main() {
 		probeAddr                   string
 		systemNamespace             string
 		unpackImage                 string
-		baseUploadManagerURL        string
 		rukpakVersion               bool
 		provisionerStorageDirectory string
-		uploadStorageDirectory      string
-		uploadStorageSyncInterval   time.Duration
 	)
 	flag.StringVar(&httpBindAddr, "http-bind-address", ":8080", "The address the http server binds to.")
 	flag.StringVar(&httpExternalAddr, "http-external-address", "http://localhost:8080", "The external address at which the http server is reachable.")
@@ -91,14 +86,11 @@ func main() {
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.StringVar(&systemNamespace, "system-namespace", "", "Configures the namespace that gets used to deploy system resources.")
 	flag.StringVar(&unpackImage, "unpack-image", util.DefaultUnpackImage, "Configures the container image that gets used to unpack Bundle contents.")
-	flag.StringVar(&baseUploadManagerURL, "base-upload-manager-url", "", "The base URL from which to fetch uploaded bundles.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
 	flag.BoolVar(&rukpakVersion, "version", false, "Displays rukpak version information")
 	flag.StringVar(&provisionerStorageDirectory, "provisioner-storage-dir", storage.DefaultBundleCacheDir, "The directory that is used to store bundle contents.")
-	flag.StringVar(&uploadStorageDirectory, "upload-storage-dir", uploadmgr.DefaultBundleCacheDir, "The directory that is used to store bundle uploads.")
-	flag.DurationVar(&uploadStorageSyncInterval, "upload-storage-sync-interval", time.Minute, "Interval on which to garbage collect unused uploaded bundles")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -116,7 +108,7 @@ func main() {
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 	setupLog.Info("starting up the core controllers and servers", "git commit", version.String(), "unpacker image", unpackImage)
 
-	dependentRequirement, err := labels.NewRequirement(util.CoreOwnerKindKey, selection.In, []string{rukpakv1alpha1.BundleKind, rukpakv1alpha1.BundleDeploymentKind})
+	dependentRequirement, err := labels.NewRequirement(util.CoreOwnerKindKey, selection.In, []string{rukpakv1alpha2.BundleDeploymentKind})
 	if err != nil {
 		setupLog.Error(err, "unable to create dependent label selector for cache")
 		os.Exit(1)
@@ -128,41 +120,6 @@ func main() {
 		systemNamespace = util.PodNamespace()
 	}
 
-	systemNsCluster, err := cluster.New(cfg, func(opts *cluster.Options) {
-		opts.Scheme = scheme
-		opts.Namespace = systemNamespace
-	})
-	if err != nil {
-		setupLog.Error(err, "unable to create system namespace cluster")
-		os.Exit(1)
-	}
-	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
-		Scheme:                 scheme,
-		MetricsBindAddress:     httpBindAddr,
-		Port:                   9443,
-		HealthProbeBindAddress: probeAddr,
-		LeaderElection:         enableLeaderElection,
-		LeaderElectionID:       "core.rukpak.io",
-		NewCache: cache.BuilderWithOptions(cache.Options{
-			SelectorsByObject: cache.SelectorsByObject{
-				&rukpakv1alpha1.BundleDeployment{}: {},
-				&rukpakv1alpha1.Bundle{}:           {},
-			},
-			DefaultSelector: cache.ObjectSelector{
-				Label: dependentSelector,
-			},
-		}),
-	})
-	if err != nil {
-		setupLog.Error(err, "unable to create manager")
-		os.Exit(1)
-	}
-
-	if err := mgr.Add(systemNsCluster); err != nil {
-		setupLog.Error(err, "unable to add system namespace cluster to manager")
-		os.Exit(1)
-	}
-
 	storageURL, err := url.Parse(fmt.Sprintf("%s/bundles/", httpExternalAddr))
 	if err != nil {
 		setupLog.Error(err, "unable to parse bundle content server URL")
@@ -172,6 +129,36 @@ func main() {
 	localStorage := &storage.LocalDirectory{
 		RootDirectory: provisionerStorageDirectory,
 		URL:           *storageURL,
+	}
+
+	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
+		Scheme: scheme,
+		Cache: cache.Options{
+			ByObject: map[client.Object]cache.ByObject{
+				&rukpakv1alpha2.BundleDeployment{}: {},
+			},
+			DefaultNamespaces: map[string]cache.Config{
+				systemNamespace:     {},
+				cache.AllNamespaces: {LabelSelector: dependentSelector},
+			},
+		},
+		Metrics: server.Options{
+			BindAddress: httpBindAddr,
+			ExtraHandlers: map[string]http.Handler{
+				// NOTE: ExtraHandlers aren't actually metrics-specific. We can run
+				// whatever handlers we want on the existing webserver that
+				// controller-runtime runs when MetricsBindAddress is configured on the
+				// manager.
+				"/bundles/": httpLogger(localStorage),
+			},
+		},
+		HealthProbeBindAddress: probeAddr,
+		LeaderElection:         enableLeaderElection,
+		LeaderElectionID:       "core.rukpak.io",
+	})
+	if err != nil {
+		setupLog.Error(err, "unable to create manager")
+		os.Exit(1)
 	}
 
 	var rootCAs *x509.CertPool
@@ -188,23 +175,6 @@ func main() {
 		storage.WithBearerToken(cfg.BearerToken),
 	)
 	bundleStorage := storage.WithFallbackLoader(localStorage, httpLoader)
-
-	// NOTE: AddMetricsExtraHandler isn't actually metrics-specific. We can run
-	// whatever handlers we want on the existing webserver that
-	// controller-runtime runs when MetricsBindAddress is configured on the
-	// manager.
-	if err := mgr.AddMetricsExtraHandler("/bundles/", httpLogger(localStorage)); err != nil {
-		setupLog.Error(err, "unable to add bundles http handler to manager")
-		os.Exit(1)
-	}
-	if err := mgr.AddMetricsExtraHandler("/uploads/", httpLogger(uploadmgr.NewUploadHandler(mgr.GetClient(), uploadStorageDirectory))); err != nil {
-		setupLog.Error(err, "unable to add uploads http handler to manager")
-		os.Exit(1)
-	}
-	if err := mgr.Add(uploadmgr.NewBundleGC(mgr.GetCache(), uploadStorageDirectory, uploadStorageSyncInterval)); err != nil {
-		setupLog.Error(err, "unable to add bundle garbage collector to manager")
-		os.Exit(1)
-	}
 
 	// This finalizer logic MUST be co-located with this main
 	// controller logic because it deals with cleaning up bundle data
@@ -225,50 +195,45 @@ func main() {
 		os.Exit(1)
 	}
 
-	unpacker, err := source.NewDefaultUnpacker(systemNsCluster, systemNamespace, unpackImage, baseUploadManagerURL, rootCAs)
+	unpacker, err := source.NewDefaultUnpacker(mgr, systemNamespace, unpackImage, rootCAs)
 	if err != nil {
 		setupLog.Error(err, "unable to setup bundle unpacker")
 		os.Exit(1)
 	}
 
-	commonBundleProvisionerOptions := []bundle.Option{
-		bundle.WithUnpacker(unpacker),
-		bundle.WithFinalizers(bundleFinalizers),
-		bundle.WithStorage(bundleStorage),
+	cfgGetter, err := helmclient.NewActionConfigGetter(mgr.GetConfig(), mgr.GetRESTMapper(), mgr.GetLogger())
+	if err != nil {
+		setupLog.Error(err, "unable to create action config getter")
+		os.Exit(1)
 	}
-
-	cfgGetter := helmclient.NewActionConfigGetter(mgr.GetConfig(), mgr.GetRESTMapper(), mgr.GetLogger())
-	acg := helmclient.NewActionClientGetter(cfgGetter)
+	acg, err := helmclient.NewActionClientGetter(cfgGetter)
+	if err != nil {
+		setupLog.Error(err, "unable to create action client getter")
+		os.Exit(1)
+	}
 	commonBDProvisionerOptions := []bundledeployment.Option{
 		bundledeployment.WithReleaseNamespace(systemNamespace),
 		bundledeployment.WithActionClientGetter(acg),
+		bundledeployment.WithFinalizers(bundleFinalizers),
 		bundledeployment.WithStorage(bundleStorage),
+		bundledeployment.WithUnpacker(unpacker),
 	}
 
-	if err := bundle.SetupWithManager(mgr, systemNsCluster.GetCache(), systemNamespace, append(
-		commonBundleProvisionerOptions,
-		bundle.WithProvisionerID(plain.ProvisionerID),
-		bundle.WithHandler(bundle.HandlerFunc(plain.HandleBundle)),
-	)...); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", rukpakv1alpha1.BundleKind, "provisionerID", plain.ProvisionerID)
-		os.Exit(1)
-	}
-
-	if err := bundle.SetupWithManager(mgr, systemNsCluster.GetCache(), systemNamespace, append(
-		commonBundleProvisionerOptions,
-		bundle.WithProvisionerID(registry.ProvisionerID),
-		bundle.WithHandler(bundle.HandlerFunc(registry.HandleBundle)),
-	)...); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", rukpakv1alpha1.BundleKind, "provisionerID", registry.ProvisionerID)
-		os.Exit(1)
-	}
-
-	if err := bundledeployment.SetupWithManager(mgr, append(
+	if err := bundledeployment.SetupWithManager(mgr, systemNamespace, append(
 		commonBDProvisionerOptions,
 		bundledeployment.WithProvisionerID(plain.ProvisionerID),
 		bundledeployment.WithHandler(bundledeployment.HandlerFunc(plain.HandleBundleDeployment)),
 	)...); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", rukpakv1alpha1.BundleDeploymentKind, "provisionerID", plain.ProvisionerID)
+		setupLog.Error(err, "unable to create controller", "controller", rukpakv1alpha2.BundleDeploymentKind, "provisionerID", plain.ProvisionerID)
+		os.Exit(1)
+	}
+
+	if err := bundledeployment.SetupWithManager(mgr, systemNamespace, append(
+		commonBDProvisionerOptions,
+		bundledeployment.WithProvisionerID(registry.ProvisionerID),
+		bundledeployment.WithHandler(bundledeployment.HandlerFunc(registry.HandleBundleDeployment)),
+	)...); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", rukpakv1alpha2.BundleDeploymentKind, "provisionerID", registry.ProvisionerID)
 		os.Exit(1)
 	}
 	//+kubebuilder:scaffold:builder

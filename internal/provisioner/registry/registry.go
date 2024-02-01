@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"io/fs"
 
-	rukpakv1alpha1 "github.com/operator-framework/rukpak/api/v1alpha1"
+	"helm.sh/helm/v3/pkg/chart"
+	"helm.sh/helm/v3/pkg/chartutil"
+
+	rukpakv1alpha2 "github.com/operator-framework/rukpak/api/v1alpha2"
 	"github.com/operator-framework/rukpak/internal/convert"
 	"github.com/operator-framework/rukpak/internal/provisioner/plain"
 )
@@ -15,14 +18,10 @@ const (
 	ProvisionerID = "core-rukpak-io-registry"
 )
 
-func HandleBundle(_ context.Context, fsys fs.FS, _ *rukpakv1alpha1.Bundle) (fs.FS, error) {
-	plainFS, err := convert.RegistryV1ToPlain(fsys)
+func HandleBundleDeployment(ctx context.Context, fsys fs.FS, bd *rukpakv1alpha2.BundleDeployment) (*chart.Chart, chartutil.Values, error) {
+	plainFS, err := convert.RegistryV1ToPlain(fsys, bd.Spec.WatchNamespaces)
 	if err != nil {
-		return nil, fmt.Errorf("convert registry+v1 bundle to plain+v0 bundle: %v", err)
+		return nil, nil, fmt.Errorf("convert registry+v1 bundle to plain+v0 bundle: %v", err)
 	}
-
-	if err := plain.ValidateBundle(plainFS); err != nil {
-		return nil, fmt.Errorf("validate bundle: %v", err)
-	}
-	return plainFS, nil
+	return plain.HandleBundleDeployment(ctx, plainFS, bd)
 }
