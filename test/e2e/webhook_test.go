@@ -5,6 +5,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -29,6 +30,7 @@ var _ = Describe("bundle deployment api validating webhook", func() {
 					GenerateName: "valid-bundle-",
 				},
 				Spec: rukpakv1alpha2.BundleDeploymentSpec{
+					InstallNamespace:     "default",
 					ProvisionerClassName: plain.ProvisionerID,
 					Source: rukpakv1alpha2.BundleSource{
 						Type: rukpakv1alpha2.SourceTypeImage,
@@ -64,6 +66,7 @@ var _ = Describe("bundle deployment api validating webhook", func() {
 					Name: "bundlenamegit",
 				},
 				Spec: rukpakv1alpha2.BundleDeploymentSpec{
+					InstallNamespace:     "default",
 					ProvisionerClassName: plain.ProvisionerID,
 					Source: rukpakv1alpha2.BundleSource{
 						Type: rukpakv1alpha2.SourceTypeGit,
@@ -99,6 +102,7 @@ var _ = Describe("bundle deployment api validating webhook", func() {
 					Name: "bundlenameimage",
 				},
 				Spec: rukpakv1alpha2.BundleDeploymentSpec{
+					InstallNamespace:     "default",
 					ProvisionerClassName: plain.ProvisionerID,
 					Source: rukpakv1alpha2.BundleSource{
 						Type: rukpakv1alpha2.SourceTypeImage,

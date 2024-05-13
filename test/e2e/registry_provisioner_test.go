@@ -6,6 +6,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -31,6 +32,7 @@ var _ = Describe("registry provisioner bundle", func() {
 					},
 				},
 				Spec: rukpakv1alpha2.BundleDeploymentSpec{
+					InstallNamespace:     "default",
 					ProvisionerClassName: registryprovisioner.ProvisionerID,
 					Source: rukpakv1alpha2.BundleSource{
 						Type: rukpakv1alpha2.SourceTypeImage,
@@ -58,9 +60,9 @@ var _ = Describe("registry provisioner bundle", func() {
 			}).Should(And(
 				Not(BeNil()),
 				WithTransform(func(c *metav1.Condition) string { return c.Type }, Equal(rukpakv1alpha2.TypeInstalled)),
+				WithTransform(func(c *metav1.Condition) string { return c.Message }, ContainSubstring("Instantiated bundle")),
 				WithTransform(func(c *metav1.Condition) metav1.ConditionStatus { return c.Status }, Equal(metav1.ConditionTrue)),
 				WithTransform(func(c *metav1.Condition) string { return c.Reason }, Equal(rukpakv1alpha2.ReasonInstallationSucceeded)),
-				WithTransform(func(c *metav1.Condition) string { return c.Message }, ContainSubstring("Instantiated bundle")),
 			))
 		})
 	})
@@ -80,6 +82,7 @@ var _ = Describe("registry provisioner bundle", func() {
 					},
 				},
 				Spec: rukpakv1alpha2.BundleDeploymentSpec{
+					InstallNamespace:     "default",
 					ProvisionerClassName: registryprovisioner.ProvisionerID,
 					Source: rukpakv1alpha2.BundleSource{
 						Type: rukpakv1alpha2.SourceTypeImage,
@@ -87,7 +90,6 @@ var _ = Describe("registry provisioner bundle", func() {
 							Ref: fmt.Sprintf("%v/%v", ImageRepo, "registry:invalid"),
 						},
 					},
-					WatchNamespaces: []string{"test1"},
 				},
 			}
 			err := c.Create(ctx, bd)

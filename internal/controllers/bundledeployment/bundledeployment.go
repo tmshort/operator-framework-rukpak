@@ -9,7 +9,6 @@ import (
 	"strings"
 	"sync"
 
-	helmclient "github.com/operator-framework/helm-operator-plugins/pkg/client"
 	"helm.sh/helm/v3/pkg/action"
 	"helm.sh/helm/v3/pkg/chart"
 	"helm.sh/helm/v3/pkg/chartutil"
@@ -36,6 +35,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/source"
+
+	helmclient "github.com/operator-framework/helm-operator-plugins/pkg/client"
 
 	rukpakv1alpha2 "github.com/operator-framework/rukpak/api/v1alpha2"
 	"github.com/operator-framework/rukpak/internal/healthchecks"
@@ -100,12 +101,6 @@ func WithActionClientGetter(acg helmclient.ActionClientGetter) Option {
 	}
 }
 
-func WithReleaseNamespace(releaseNamespace string) Option {
-	return func(c *controller) {
-		c.releaseNamespace = releaseNamespace
-	}
-}
-
 func SetupWithManager(mgr manager.Manager, systemNamespace string, opts ...Option) error {
 	c := &controller{
 		cl:               mgr.GetClient(),
@@ -158,9 +153,6 @@ func (c *controller) validateConfig() error {
 	if c.finalizers == nil {
 		errs = append(errs, errors.New("finalizer handler is unset"))
 	}
-	if c.releaseNamespace == "" {
-		errs = append(errs, errors.New("release namespace is unset"))
-	}
 	return utilerrors.NewAggregate(errs)
 }
 
@@ -169,11 +161,10 @@ type controller struct {
 	cl    client.Client
 	cache cache.Cache
 
-	handler          Handler
-	provisionerID    string
-	acg              helmclient.ActionClientGetter
-	storage          storage.Storage
-	releaseNamespace string
+	handler       Handler
+	provisionerID string
+	acg           helmclient.ActionClientGetter
+	storage       storage.Storage
 
 	unpacker          unpackersource.Unpacker
 	controller        crcontroller.Controller
@@ -306,9 +297,7 @@ func (c *controller) reconcile(ctx context.Context, bd *rukpakv1alpha2.BundleDep
 		return ctrl.Result{}, err
 	}
 
-	bd.SetNamespace(c.releaseNamespace)
-	cl, err := c.acg.ActionClientFor(bd)
-	bd.SetNamespace("")
+	cl, err := c.acg.ActionClientFor(ctx, bd)
 	if err != nil {
 		setInstalledAndHealthyFalse(bd, rukpakv1alpha2.ReasonErrorGettingClient, err.Error())
 		return ctrl.Result{}, err
@@ -329,16 +318,10 @@ func (c *controller) reconcile(ctx context.Context, bd *rukpakv1alpha2.BundleDep
 
 	switch state {
 	case stateNeedsInstall:
-		rel, err = cl.Install(bd.Name, c.releaseNamespace, chrt, values, func(install *action.Install) error {
+		rel, err = cl.Install(bd.Name, bd.Spec.InstallNamespace, chrt, values, func(install *action.Install) error {
 			install.CreateNamespace = false
 			return nil
-		},
-			// To be refactored issue https://github.com/operator-framework/rukpak/issues/534
-			func(install *action.Install) error {
-				post.cascade = install.PostRenderer
-				install.PostRenderer = post
-				return nil
-			})
+		}, helmclient.AppendInstallPostRenderer(post))
 		if err != nil {
 			if isResourceNotFoundErr(err) {
 				err = errRequiredResourceNotFound{err}
@@ -347,13 +330,7 @@ func (c *controller) reconcile(ctx context.Context, bd *rukpakv1alpha2.BundleDep
 			return ctrl.Result{}, err
 		}
 	case stateNeedsUpgrade:
-		rel, err = cl.Upgrade(bd.Name, c.releaseNamespace, chrt, values,
-			// To be refactored issue https://github.com/operator-framework/rukpak/issues/534
-			func(upgrade *action.Upgrade) error {
-				post.cascade = upgrade.PostRenderer
-				upgrade.PostRenderer = post
-				return nil
-			})
+		rel, err = cl.Upgrade(bd.Name, bd.Spec.InstallNamespace, chrt, values, helmclient.AppendUpgradePostRenderer(post))
 		if err != nil {
 			if isResourceNotFoundErr(err) {
 				err = errRequiredResourceNotFound{err}
@@ -464,24 +441,18 @@ const (
 	stateError        releaseState = "Error"
 )
 
-func (c *controller) getReleaseState(cl helmclient.ActionInterface, obj metav1.Object, chrt *chart.Chart, values chartutil.Values, post *postrenderer) (*release.Release, releaseState, error) {
-	currentRelease, err := cl.Get(obj.GetName())
+func (c *controller) getReleaseState(cl helmclient.ActionInterface, bd *rukpakv1alpha2.BundleDeployment, chrt *chart.Chart, values chartutil.Values, post *postrenderer) (*release.Release, releaseState, error) {
+	currentRelease, err := cl.Get(bd.GetName())
 	if err != nil && !errors.Is(err, driver.ErrReleaseNotFound) {
 		return nil, stateError, err
 	}
 	if errors.Is(err, driver.ErrReleaseNotFound) {
 		return nil, stateNeedsInstall, nil
 	}
-	desiredRelease, err := cl.Upgrade(obj.GetName(), c.releaseNamespace, chrt, values, func(upgrade *action.Upgrade) error {
+	desiredRelease, err := cl.Upgrade(bd.GetName(), bd.Spec.InstallNamespace, chrt, values, func(upgrade *action.Upgrade) error {
 		upgrade.DryRun = true
 		return nil
-	},
-		// To be refactored issue https://github.com/operator-framework/rukpak/issues/534
-		func(upgrade *action.Upgrade) error {
-			post.cascade = upgrade.PostRenderer
-			upgrade.PostRenderer = post
-			return nil
-		})
+	}, helmclient.AppendUpgradePostRenderer(post))
 	if err != nil {
 		return currentRelease, stateError, err
 	}
@@ -521,7 +492,10 @@ func isResourceNotFoundErr(err error) bool {
 	//   An error that is bubbled up from the k8s.io/cli-runtime library
 	//   does not wrap meta.NoKindMatchError, so we need to fallback to
 	//   the use of string comparisons for now.
-	return strings.Contains(err.Error(), "no matches for kind")
+	if strings.Contains(err.Error(), "no matches for kind") {
+		return true
+	}
+	return strings.Contains(err.Error(), "the server could not find the requested resource")
 }
 
 type postrenderer struct {

@@ -6,6 +6,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/rand"
@@ -30,6 +31,7 @@ var _ = Describe("bundle api validation", func() {
 					Name: "olm-crds-too-long-name-for-the-bundle-1234567890-1234567890",
 				},
 				Spec: rukpakv1alpha2.BundleDeploymentSpec{
+					InstallNamespace:     "default",
 					ProvisionerClassName: plain.ProvisionerID,
 					Source: rukpakv1alpha2.BundleSource{
 						Type: rukpakv1alpha2.SourceTypeImage,
@@ -65,6 +67,7 @@ var _ = Describe("bundle api validation", func() {
 					Name: "bundlenamegit",
 				},
 				Spec: rukpakv1alpha2.BundleDeploymentSpec{
+					InstallNamespace:     "default",
 					ProvisionerClassName: plain.ProvisionerID,
 					Source: rukpakv1alpha2.BundleSource{
 						Type: "invalid source",
@@ -108,6 +111,7 @@ var _ = Describe("bundle api validation", func() {
 					Name: "bundlenamegit",
 				},
 				Spec: rukpakv1alpha2.BundleDeploymentSpec{
+					InstallNamespace:     "default",
 					ProvisionerClassName: plain.ProvisionerID,
 					Source: rukpakv1alpha2.BundleSource{
 						Type: "invalid source",
@@ -141,6 +145,7 @@ var _ = Describe("bundle api validation", func() {
 					Name: "bundlenamemorerefs",
 				},
 				Spec: rukpakv1alpha2.BundleDeploymentSpec{
+					InstallNamespace:     "default",
 					ProvisionerClassName: plain.ProvisionerID,
 					Source: rukpakv1alpha2.BundleSource{
 						Type: rukpakv1alpha2.SourceTypeGit,
@@ -181,6 +186,7 @@ var _ = Describe("bundle api validation", func() {
 					Name: "bundlenamemorerefs",
 				},
 				Spec: rukpakv1alpha2.BundleDeploymentSpec{
+					InstallNamespace:     "default",
 					ProvisionerClassName: plain.ProvisionerID,
 					Source: rukpakv1alpha2.BundleSource{
 						Type: rukpakv1alpha2.SourceTypeGit,
@@ -222,6 +228,7 @@ var _ = Describe("bundle api validation", func() {
 					Name: fmt.Sprintf("bundle-invalid-%s", rand.String(6)),
 				},
 				Spec: rukpakv1alpha2.BundleDeploymentSpec{
+					InstallNamespace:     "default",
 					ProvisionerClassName: "invalid/class-name",
 					Source: rukpakv1alpha2.BundleSource{
 						Type: rukpakv1alpha2.SourceTypeImage,
@@ -259,6 +266,7 @@ var _ = Describe("bundle api validation", func() {
 					Name: fmt.Sprintf("bd-invalid-%s", rand.String(6)),
 				},
 				Spec: rukpakv1alpha2.BundleDeploymentSpec{
+					InstallNamespace:     "default",
 					ProvisionerClassName: "invalid/class-name",
 					Source: rukpakv1alpha2.BundleSource{
 						Type: rukpakv1alpha2.SourceTypeImage,

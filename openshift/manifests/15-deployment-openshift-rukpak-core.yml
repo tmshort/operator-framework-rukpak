@@ -45,6 +45,7 @@ spec:
             capabilities:
               drop:
                 - ALL
+          terminationMessagePolicy: FallbackToLogsOnError
           volumeMounts:
             - mountPath: /etc/pki/tls
               name: certs
@@ -74,6 +75,7 @@ spec:
             capabilities:
               drop:
                 - ALL
+          terminationMessagePolicy: FallbackToLogsOnError
           volumeMounts:
             - mountPath: /var/cache/bundles
               name: bundle-cache
