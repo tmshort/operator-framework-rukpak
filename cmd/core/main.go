@@ -28,6 +28,7 @@ import (
 	"github.com/gorilla/handlers"
 	"github.com/spf13/pflag"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apiextensionsv1client "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/typed/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/selection"
@@ -46,14 +47,15 @@ import (
 
 	rukpakv1alpha2 "github.com/operator-framework/rukpak/api/v1alpha2"
 	"github.com/operator-framework/rukpak/internal/controllers/bundledeployment"
-	"github.com/operator-framework/rukpak/internal/finalizer"
 	"github.com/operator-framework/rukpak/internal/provisioner/plain"
 	"github.com/operator-framework/rukpak/internal/provisioner/registry"
-	"github.com/operator-framework/rukpak/internal/source"
-	"github.com/operator-framework/rukpak/internal/storage"
-	"github.com/operator-framework/rukpak/internal/util"
 	"github.com/operator-framework/rukpak/internal/version"
 	"github.com/operator-framework/rukpak/pkg/features"
+	"github.com/operator-framework/rukpak/pkg/finalizer"
+	"github.com/operator-framework/rukpak/pkg/preflights/crdupgradesafety"
+	"github.com/operator-framework/rukpak/pkg/source"
+	"github.com/operator-framework/rukpak/pkg/storage"
+	"github.com/operator-framework/rukpak/pkg/util"
 )
 
 var (
@@ -77,7 +79,7 @@ func main() {
 		enableLeaderElection        bool
 		probeAddr                   string
 		systemNamespace             string
-		unpackImage                 string
+		unpackCacheDir              string
 		rukpakVersion               bool
 		provisionerStorageDirectory string
 	)
@@ -86,7 +88,7 @@ func main() {
 	flag.StringVar(&bundleCAFile, "bundle-ca-file", "", "The file containing the certificate authority for connecting to bundle content servers.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.StringVar(&systemNamespace, "system-namespace", "", "Configures the namespace that gets used to deploy system resources.")
-	flag.StringVar(&unpackImage, "unpack-image", util.DefaultUnpackImage, "Configures the container image that gets used to unpack Bundle contents.")
+	flag.StringVar(&unpackCacheDir, "unpack-cache-dir", "/var/cache/unpack", "Configures the directory that gets used to unpack and cache Bundle contents.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
@@ -107,7 +109,7 @@ func main() {
 	}
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
-	setupLog.Info("starting up the core controllers and servers", "git commit", version.String(), "unpacker image", unpackImage)
+	setupLog.Info("starting up the core controllers and servers", "git commit", version.String(), "unpacker cache", unpackCacheDir)
 
 	dependentRequirement, err := labels.NewRequirement(util.CoreOwnerKindKey, selection.In, []string{rukpakv1alpha2.BundleDeploymentKind})
 	if err != nil {
@@ -196,9 +198,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	unpacker, err := source.NewDefaultUnpacker(mgr, systemNamespace, unpackImage, rootCAs)
+	unpacker, err := source.NewDefaultUnpacker(mgr, systemNamespace, unpackCacheDir, rootCAs)
 	if err != nil {
 		setupLog.Error(err, "unable to setup bundle unpacker")
+		os.Exit(1)
+	}
+
+	if err := bundleFinalizers.Register(finalizer.CleanupUnpackCacheKey, &finalizer.CleanupUnpackCache{Unpacker: unpacker}); err != nil {
+		setupLog.Error(err, "unable to register finalizer", "finalizerKey", finalizer.CleanupUnpackCacheKey)
 		os.Exit(1)
 	}
 
@@ -226,11 +233,23 @@ func main() {
 		setupLog.Error(err, "unable to create action client getter")
 		os.Exit(1)
 	}
+
+	aeClient, err := apiextensionsv1client.NewForConfig(cfg)
+	if err != nil {
+		setupLog.Error(err, "unable to create apiextensions client")
+		os.Exit(1)
+	}
+
+	preflights := []bundledeployment.Preflight{
+		crdupgradesafety.NewPreflight(aeClient.CustomResourceDefinitions()),
+	}
+
 	commonBDProvisionerOptions := []bundledeployment.Option{
 		bundledeployment.WithActionClientGetter(acg),
 		bundledeployment.WithFinalizers(bundleFinalizers),
 		bundledeployment.WithStorage(bundleStorage),
 		bundledeployment.WithUnpacker(unpacker),
+		bundledeployment.WithPreflights(preflights...),
 	}
 
 	if err := bundledeployment.SetupWithManager(mgr, systemNamespace, append(
@@ -261,8 +280,9 @@ func main() {
 		os.Exit(1)
 	}
 
+	ctx := ctrl.SetupSignalHandler()
 	setupLog.Info("starting manager")
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+	if err := mgr.Start(ctx); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}

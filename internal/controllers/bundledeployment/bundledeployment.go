@@ -40,11 +40,11 @@ import (
 
 	rukpakv1alpha2 "github.com/operator-framework/rukpak/api/v1alpha2"
 	"github.com/operator-framework/rukpak/internal/healthchecks"
-	helmpredicate "github.com/operator-framework/rukpak/internal/helm-operator-plugins/predicate"
-	unpackersource "github.com/operator-framework/rukpak/internal/source"
-	"github.com/operator-framework/rukpak/internal/storage"
-	"github.com/operator-framework/rukpak/internal/util"
 	"github.com/operator-framework/rukpak/pkg/features"
+	helmpredicate "github.com/operator-framework/rukpak/pkg/helm-operator-plugins/predicate"
+	unpackersource "github.com/operator-framework/rukpak/pkg/source"
+	"github.com/operator-framework/rukpak/pkg/storage"
+	"github.com/operator-framework/rukpak/pkg/util"
 )
 
 /*
@@ -98,6 +98,12 @@ func WithUnpacker(u unpackersource.Unpacker) Option {
 func WithActionClientGetter(acg helmclient.ActionClientGetter) Option {
 	return func(c *controller) {
 		c.acg = acg
+	}
+}
+
+func WithPreflights(preflights ...Preflight) Option {
+	return func(c *controller) {
+		c.preflights = preflights
 	}
 }
 
@@ -156,6 +162,21 @@ func (c *controller) validateConfig() error {
 	return utilerrors.NewAggregate(errs)
 }
 
+// Preflight is a check that should be run before making any changes to the cluster
+type Preflight interface {
+	// Install runs checks that should be successful prior
+	// to installing the Helm release. It is provided
+	// a Helm release and returns an error if the
+	// check is unsuccessful
+	Install(context.Context, *release.Release) error
+
+	// Upgrade runs checks that should be successful prior
+	// to upgrading the Helm release. It is provided
+	// a Helm release and returns an error if the
+	// check is unsuccessful
+	Upgrade(context.Context, *release.Release) error
+}
+
 // controller reconciles a BundleDeployment object
 type controller struct {
 	cl    client.Client
@@ -165,6 +186,8 @@ type controller struct {
 	provisionerID string
 	acg           helmclient.ActionClientGetter
 	storage       storage.Storage
+
+	preflights []Preflight
 
 	unpacker          unpackersource.Unpacker
 	controller        crcontroller.Controller
@@ -235,7 +258,6 @@ func (c *controller) reconcile(ctx context.Context, bd *rukpakv1alpha2.BundleDep
 
 	// handle finalizers.
 	_, err := c.finalizers.Finalize(ctx, bd)
-
 	if err != nil {
 		bd.Status.ResolvedSource = nil
 		bd.Status.ContentURL = ""
@@ -310,10 +332,27 @@ func (c *controller) reconcile(ctx context.Context, bd *rukpakv1alpha2.BundleDep
 		},
 	}
 
-	rel, state, err := c.getReleaseState(cl, bd, chrt, values, post)
+	rel, desiredRel, state, err := c.getReleaseState(cl, bd, chrt, values, post)
 	if err != nil {
 		setInstalledAndHealthyFalse(bd, rukpakv1alpha2.ReasonErrorGettingReleaseState, err.Error())
 		return ctrl.Result{}, err
+	}
+
+	for _, preflight := range c.preflights {
+		switch state {
+		case stateNeedsInstall:
+			err := preflight.Install(ctx, desiredRel)
+			if err != nil {
+				setInstalledAndHealthyFalse(bd, rukpakv1alpha2.ReasonInstallFailed, err.Error())
+				return ctrl.Result{}, err
+			}
+		case stateNeedsUpgrade:
+			err := preflight.Upgrade(ctx, desiredRel)
+			if err != nil {
+				setInstalledAndHealthyFalse(bd, rukpakv1alpha2.ReasonInstallFailed, err.Error())
+				return ctrl.Result{}, err
+			}
+		}
 	}
 
 	switch state {
@@ -371,9 +410,18 @@ func (c *controller) reconcile(ctx context.Context, bd *rukpakv1alpha2.BundleDep
 			_, isWatched := c.dynamicWatchGVKs[unstructuredObj.GroupVersionKind()]
 			if !isWatched {
 				if err := c.controller.Watch(
-					source.Kind(c.cache, unstructuredObj),
-					handler.EnqueueRequestForOwner(c.cl.Scheme(), c.cl.RESTMapper(), bd, handler.OnlyControllerOwner()),
-					helmpredicate.DependentPredicateFuncs()); err != nil {
+					source.Kind(
+						c.cache,
+						unstructuredObj,
+						handler.TypedEnqueueRequestForOwner[*unstructured.Unstructured](
+							c.cl.Scheme(),
+							c.cl.RESTMapper(),
+							bd,
+							handler.OnlyControllerOwner(),
+						),
+						helmpredicate.DependentPredicateFuncs[*unstructured.Unstructured](),
+					),
+				); err != nil {
 					return err
 				}
 				c.dynamicWatchGVKs[unstructuredObj.GroupVersionKind()] = struct{}{}
@@ -441,27 +489,35 @@ const (
 	stateError        releaseState = "Error"
 )
 
-func (c *controller) getReleaseState(cl helmclient.ActionInterface, bd *rukpakv1alpha2.BundleDeployment, chrt *chart.Chart, values chartutil.Values, post *postrenderer) (*release.Release, releaseState, error) {
+func (c *controller) getReleaseState(cl helmclient.ActionInterface, bd *rukpakv1alpha2.BundleDeployment, chrt *chart.Chart, values chartutil.Values, post *postrenderer) (*release.Release, *release.Release, releaseState, error) {
 	currentRelease, err := cl.Get(bd.GetName())
 	if err != nil && !errors.Is(err, driver.ErrReleaseNotFound) {
-		return nil, stateError, err
+		return nil, nil, stateError, err
 	}
 	if errors.Is(err, driver.ErrReleaseNotFound) {
-		return nil, stateNeedsInstall, nil
+		desiredRelease, err := cl.Install(bd.GetName(), bd.Spec.InstallNamespace, chrt, values, func(i *action.Install) error {
+			i.DryRun = true
+			return nil
+		}, helmclient.AppendInstallPostRenderer(post))
+		if err != nil {
+			return nil, nil, stateError, err
+		}
+		return nil, desiredRelease, stateNeedsInstall, nil
 	}
 	desiredRelease, err := cl.Upgrade(bd.GetName(), bd.Spec.InstallNamespace, chrt, values, func(upgrade *action.Upgrade) error {
 		upgrade.DryRun = true
 		return nil
 	}, helmclient.AppendUpgradePostRenderer(post))
 	if err != nil {
-		return currentRelease, stateError, err
+		return currentRelease, nil, stateError, err
 	}
+	relState := stateUnchanged
 	if desiredRelease.Manifest != currentRelease.Manifest ||
 		currentRelease.Info.Status == release.StatusFailed ||
 		currentRelease.Info.Status == release.StatusSuperseded {
-		return currentRelease, stateNeedsUpgrade, nil
+		relState = stateNeedsUpgrade
 	}
-	return currentRelease, stateUnchanged, nil
+	return currentRelease, desiredRelease, relState, nil
 }
 
 type errRequiredResourceNotFound struct {

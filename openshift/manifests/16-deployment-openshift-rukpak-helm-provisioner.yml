@@ -53,7 +53,7 @@ spec:
               name: ca-bundle
               readOnly: false
         - args:
-            - --unpack-image=${RUKPAK_IMAGE}
+            - --unpack-cache-dir=/var/cache/unpack
             - --storage-dir=/var/cache/bundles
             - --http-bind-address=127.0.0.1:8080
             - --http-external-address=https://helm-provisioner.openshift-rukpak.svc
@@ -78,6 +78,8 @@ spec:
           volumeMounts:
             - mountPath: /var/cache/bundles
               name: bundle-cache
+            - mountPath: /var/cache/unpack
+              name: unpack-cache
             - mountPath: /etc/pki/tls
               name: certs
             - mountPath: /etc/configmaps/ca-bundle
@@ -92,6 +94,8 @@ spec:
       volumes:
         - emptyDir: {}
           name: bundle-cache
+        - emptyDir: {}
+          name: unpack-cache
         - name: certs
           secret:
             optional: false
